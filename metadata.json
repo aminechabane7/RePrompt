@@ -1,0 +1,6 @@
+{
+  "name": "Image to Prompt",
+  "description": "Upload any image to generate detailed, copy-ready AI prompts for Midjourney v7, FLUX 1.1 Pro, SD 3.5 Large, and Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
