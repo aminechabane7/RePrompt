@@ -64,18 +64,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    // Sign up Turnstile token validation guard
-    if (mode === 'signup') {
-      if (password.length < 6) {
-        setErrorMsg('Password must be at least 6 characters.');
-        return;
-      }
+    if (mode === 'signup' && password.length < 6) {
+      setErrorMsg('Password must be at least 6 characters.');
+      return;
+    }
 
-      // If Turnstile Site Key is configured, require successful verification before sending request
-      if (turnstileSiteKey && !turnstileToken) {
-        setErrorMsg('Please complete the security check.');
-        return;
-      }
+    // Require Turnstile security check when site key is configured
+    if (turnstileSiteKey && !turnstileToken) {
+      setErrorMsg('Please complete the security check.');
+      return;
     }
 
     setLoading(true);
@@ -134,12 +131,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           setSuccessMsg('Account registered! Please check your email inbox to verify your account.');
         }
       } else if (mode === 'signin') {
+        const signInOptions: { captchaToken?: string } = {};
+        if (turnstileToken) {
+          signInOptions.captchaToken = turnstileToken;
+        }
+
         const { error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password,
+          options: signInOptions,
         });
 
         if (error) {
+          setTurnstileToken(null);
+          resetTurnstileRef.current?.();
+
+          if (
+            error.message.toLowerCase().includes('captcha') ||
+            error.message.toLowerCase().includes('security check') ||
+            error.message.toLowerCase().includes('turnstile')
+          ) {
+            throw new Error('Security verification failed. Please complete the security check again.');
+          }
           if (error.message.includes('Invalid login credentials')) {
             throw new Error('Invalid email or password.');
           }
@@ -149,15 +162,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           throw error;
         }
 
+        // Successfully consumed token
+        setTurnstileToken(null);
         setSuccessMsg('Signed in successfully.');
         setTimeout(() => onClose(), 800);
       } else if (mode === 'forgot') {
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        const resetOptions: { redirectTo?: string; captchaToken?: string } = {
           redirectTo: `${window.location.origin}/`,
-        });
+        };
+        if (turnstileToken) {
+          resetOptions.captchaToken = turnstileToken;
+        }
 
-        if (error) throw error;
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), resetOptions);
 
+        if (error) {
+          setTurnstileToken(null);
+          resetTurnstileRef.current?.();
+
+          if (
+            error.message.toLowerCase().includes('captcha') ||
+            error.message.toLowerCase().includes('security check') ||
+            error.message.toLowerCase().includes('turnstile')
+          ) {
+            throw new Error('Security verification failed. Please complete the security check again.');
+          }
+          throw error;
+        }
+
+        setTurnstileToken(null);
         setSuccessMsg('Password recovery link sent! Please check your email.');
       }
     } catch (err: any) {
@@ -169,9 +202,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // Sign up button is disabled while processing or if Turnstile check is incomplete
+  // Submit button is disabled while processing or if Turnstile check is incomplete
   const isSubmitDisabled =
-    loading || (mode === 'signup' && Boolean(turnstileSiteKey) && !turnstileToken);
+    loading || (Boolean(turnstileSiteKey) && !turnstileToken);
 
   return (
     <div
@@ -291,19 +324,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
-          {/* Cloudflare Turnstile CAPTCHA (Sign Up Only) */}
-          {mode === 'signup' && (
-            <div className="pt-1">
-              <TurnstileWidget
-                siteKey={turnstileSiteKey}
-                action="signup"
-                onVerify={handleTurnstileVerify}
-                onExpire={handleTurnstileExpire}
-                onError={handleTurnstileError}
-                resetRef={resetTurnstileRef}
-              />
-            </div>
-          )}
+          {/* Cloudflare Turnstile CAPTCHA (Protects Sign Up, Sign In, and Password Reset) */}
+          <div className="pt-1">
+            <TurnstileWidget
+              key={mode}
+              siteKey={turnstileSiteKey}
+              action={mode === 'signin' ? 'login' : mode === 'signup' ? 'signup' : 'forgot'}
+              onVerify={handleTurnstileVerify}
+              onExpire={handleTurnstileExpire}
+              onError={handleTurnstileError}
+              resetRef={resetTurnstileRef}
+            />
+          </div>
 
           <button
             type="submit"
