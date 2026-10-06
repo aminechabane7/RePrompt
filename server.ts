@@ -694,30 +694,38 @@ function handleApiError(err: any, res: Response, fallbackMsg: string) {
 // API ROUTES
 // =========================================================================
 
-// POST /api/auth/validate-email - Pre-check email syntax & disposable status (safe rate-limited check)
-app.post('/api/auth/validate-email', emailCheckRateLimiter, (req: Request, res: Response): void => {
+// POST /api/validate-email & /api/auth/validate-email - Pre-check email syntax & disposable status
+const handleValidateEmail = (req: Request, res: Response): void => {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   const { email } = req.body || {};
   const validation = validateSignupEmail(email);
-  if (!validation.isValid) {
-    res.status(400).json({
-      valid: false,
-      error: validation.error || 'Please enter a valid email address.',
-    });
-    return;
-  }
 
   if (validation.isDisposable) {
     res.status(400).json({
-      valid: false,
-      error: 'Temporary or disposable email addresses are not allowed. Please use a permanent email address.',
+      ok: false,
+      error: 'DISPOSABLE_EMAIL',
+      message: 'Temporary or disposable email addresses are not allowed. Please use a permanent email address.',
     });
     return;
   }
 
-  res.json({
-    valid: true,
+  if (!validation.isValid) {
+    res.status(400).json({
+      ok: false,
+      error: 'INVALID_SYNTAX',
+      message: validation.error || 'Please enter a valid email address format.',
+    });
+    return;
+  }
+
+  res.status(200).json({
+    ok: true,
+    domain: validation.domain,
   });
-});
+};
+
+app.post('/api/validate-email', emailCheckRateLimiter, handleValidateEmail);
+app.post('/api/auth/validate-email', emailCheckRateLimiter, handleValidateEmail);
 
 // POST /api/auth/signup - Authoritative Server-Side Registration & Disposable Email Guard
 app.post('/api/auth/signup', signupRateLimiter, async (req: Request, res: Response): Promise<void> => {

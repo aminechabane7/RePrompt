@@ -79,7 +79,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     try {
       if (mode === 'signup') {
-        // Fast client-side pre-check for obvious disposable domains to avoid wasting CAPTCHA tokens
+        // 1. Fast client-side pre-check for obvious disposable domains to avoid wasting CAPTCHA tokens
         const emailDomain = email.trim().split('@')[1]?.toLowerCase();
         if (
           emailDomain &&
@@ -98,40 +98,96 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           return;
         }
 
-        // Authoritative server-side registration (verifies syntax, full 120,000+ disposable blocklist, & rate limit)
-        const res = await fetch('/api/auth/signup', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
+        // 2. Authoritative server-side disposable email check
+        let isValidationVerified = false;
+        try {
+          const valRes = await fetch('/api/validate-email', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ email: email.trim() }),
+          });
+
+          const contentType = valRes.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const valData = await valRes.json();
+            if (valData.ok === false) {
+              setTurnstileToken(null);
+              resetTurnstileRef.current?.();
+              if (valData.error === 'DISPOSABLE_EMAIL') {
+                setErrorMsg('Temporary or disposable email addresses are not allowed. Please use a permanent email address.');
+              } else {
+                setErrorMsg(valData.message || 'Please enter a valid email address.');
+              }
+              return;
+            }
+            if (valData.ok === true) {
+              isValidationVerified = true;
+            }
+          } else {
+            console.warn('Non-JSON response from email validator:', valRes.status);
+          }
+        } catch (fetchErr) {
+          console.warn('Email validation fetch error:', fetchErr);
+        }
+
+        // 3. Supabase Auth signUp with verified permanent email & Cloudflare Turnstile token
+        const signUpOptions: {
+          data: { full_name: string };
+          captchaToken?: string;
+        } = {
+          data: {
+            full_name: displayName.trim(),
           },
-          body: JSON.stringify({
-            email: email.trim(),
-            password,
-            displayName: displayName.trim(),
-            captchaToken: turnstileToken,
-          }),
+        };
+
+        if (turnstileToken) {
+          signUpOptions.captchaToken = turnstileToken;
+        }
+
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: signUpOptions,
         });
 
-        const result = await res.json();
-
-        if (!res.ok || !result.success) {
+        if (error) {
           // Reset Turnstile token & widget immediately on error
           setTurnstileToken(null);
           resetTurnstileRef.current?.();
 
-          throw new Error(result.error || 'Unable to create account. Please try again.');
+          // User-friendly error sanitization
+          if (
+            error.message.toLowerCase().includes('captcha') ||
+            error.message.toLowerCase().includes('security check') ||
+            error.message.toLowerCase().includes('turnstile')
+          ) {
+            throw new Error('Security verification failed. Please complete the security check again.');
+          }
+          if (
+            error.message.toLowerCase().includes('already registered') ||
+            error.message.toLowerCase().includes('already exists')
+          ) {
+            throw new Error('An account with this email already exists. Please sign in instead.');
+          }
+          if (
+            error.message.toLowerCase().includes('error sending confirmation email') ||
+            error.message.toLowerCase().includes('smtp') ||
+            error.message.toLowerCase().includes('mail')
+          ) {
+            throw new Error('Error sending verification email. Please check your email configuration or try again shortly.');
+          }
+          throw new Error(error.message || 'Unable to create account. Please try again.');
         }
 
         // Successfully consumed token: reset in-memory state
         setTurnstileToken(null);
 
-        if (result.session) {
-          if (supabase) {
-            await supabase.auth.setSession(result.session);
-          }
+        if (data.session) {
           setSuccessMsg('Account created successfully! Welcome to RePrompt.');
           setTimeout(() => onClose(), 1200);
-        } else if (result.user && !result.session) {
+        } else if (data.user && !data.session) {
           setSuccessMsg('Account registered! Please check your email inbox to verify your account.');
         }
       } else if (mode === 'signin') {
