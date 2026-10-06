@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { X, Mail, Lock, User as UserIcon, AlertCircle, CheckCircle, ArrowRight, Loader2 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+import { TurnstileWidget } from './TurnstileWidget';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -21,7 +22,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Cloudflare Turnstile token lifecycle state (strictly in-memory, never persisted)
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const resetTurnstileRef = useRef<(() => void) | null>(null);
+
+  // Retrieve frontend-safe Turnstile Site Key from Vite environment variables
+  const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || '';
+
   if (!isOpen) return null;
+
+  const handleModeChange = (newMode: 'signin' | 'signup' | 'forgot') => {
+    setMode(newMode);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setTurnstileToken(null);
+    resetTurnstileRef.current?.();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,25 +49,68 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
+    // Sign up Turnstile token validation guard
+    if (mode === 'signup') {
+      if (password.length < 6) {
+        setErrorMsg('Password must be at least 6 characters.');
+        return;
+      }
+
+      // If Turnstile Site Key is configured, require successful verification before sending request
+      if (turnstileSiteKey && !turnstileToken) {
+        setErrorMsg('Please complete the security check.');
+        return;
+      }
+    }
+
     setLoading(true);
 
     try {
       if (mode === 'signup') {
-        if (password.length < 6) {
-          throw new Error('Password must be at least 6 characters.');
+        const signUpOptions: {
+          data: { full_name: string };
+          captchaToken?: string;
+        } = {
+          data: {
+            full_name: displayName.trim(),
+          },
+        };
+
+        // Pass Turnstile CAPTCHA token to Supabase Auth
+        if (turnstileToken) {
+          signUpOptions.captchaToken = turnstileToken;
         }
 
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: {
-            data: {
-              full_name: displayName.trim(),
-            },
-          },
+          options: signUpOptions,
         });
 
-        if (error) throw error;
+        if (error) {
+          // Reset Turnstile token & widget immediately on error
+          setTurnstileToken(null);
+          resetTurnstileRef.current?.();
+
+          // User-friendly error sanitization
+          if (
+            error.message.toLowerCase().includes('captcha') ||
+            error.message.toLowerCase().includes('security check') ||
+            error.message.toLowerCase().includes('turnstile')
+          ) {
+            throw new Error('Security verification failed. Please complete the security check again.');
+          }
+          if (
+            error.message.toLowerCase().includes('already registered') ||
+            error.message.toLowerCase().includes('already exists')
+          ) {
+            throw new Error('An account with this email already exists. Please sign in instead.');
+          }
+          throw new Error(error.message || 'Unable to create account. Please try again.');
+        }
+
+        // Successfully consumed token: reset in-memory state
+        setTurnstileToken(null);
 
         if (data.session) {
           setSuccessMsg('Account created successfully! Welcome to RePrompt.');
@@ -87,11 +146,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setSuccessMsg('Password recovery link sent! Please check your email.');
       }
     } catch (err: any) {
+      setTurnstileToken(null);
+      resetTurnstileRef.current?.();
       setErrorMsg(err.message || 'An authentication error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
   };
+
+  // Sign up button is disabled while processing or if Turnstile check is incomplete
+  const isSubmitDisabled =
+    loading || (mode === 'signup' && Boolean(turnstileSiteKey) && !turnstileToken);
 
   return (
     <div
@@ -189,11 +254,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 {mode === 'signin' && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setMode('forgot');
-                      setErrorMsg(null);
-                      setSuccessMsg(null);
-                    }}
+                    onClick={() => handleModeChange('forgot')}
                     className="text-xs text-neutral-500 hover:text-neutral-900 transition-colors"
                   >
                     Forgot password?
@@ -215,10 +276,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
+          {/* Cloudflare Turnstile CAPTCHA (Sign Up Only) */}
+          {mode === 'signup' && (
+            <div className="pt-1">
+              <TurnstileWidget
+                siteKey={turnstileSiteKey}
+                onVerify={(token) => {
+                  setTurnstileToken(token);
+                  setErrorMsg(null);
+                }}
+                onExpire={() => {
+                  setTurnstileToken(null);
+                  setErrorMsg('Security check expired. Please complete the verification again.');
+                }}
+                onError={() => {
+                  setTurnstileToken(null);
+                  setErrorMsg('Security verification could not load. Please check your connection or ad blocker.');
+                }}
+                resetRef={resetTurnstileRef}
+              />
+            </div>
+          )}
+
           <button
             type="submit"
-            disabled={loading}
-            className="w-full py-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white font-semibold text-sm transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-60"
+            disabled={isSubmitDisabled}
+            className="w-full py-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white font-semibold text-sm transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -242,11 +325,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               Don't have an account yet?{' '}
               <button
                 type="button"
-                onClick={() => {
-                  setMode('signup');
-                  setErrorMsg(null);
-                  setSuccessMsg(null);
-                }}
+                onClick={() => handleModeChange('signup')}
                 className="font-semibold text-neutral-900 underline hover:text-neutral-700"
               >
                 Create one now
@@ -259,11 +338,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               Already have an account?{' '}
               <button
                 type="button"
-                onClick={() => {
-                  setMode('signin');
-                  setErrorMsg(null);
-                  setSuccessMsg(null);
-                }}
+                onClick={() => handleModeChange('signin')}
                 className="font-semibold text-neutral-900 underline hover:text-neutral-700"
               >
                 Sign in
@@ -276,11 +351,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               Remembered your password?{' '}
               <button
                 type="button"
-                onClick={() => {
-                  setMode('signin');
-                  setErrorMsg(null);
-                  setSuccessMsg(null);
-                }}
+                onClick={() => handleModeChange('signin')}
                 className="font-semibold text-neutral-900 underline hover:text-neutral-700"
               >
                 Back to Sign in
