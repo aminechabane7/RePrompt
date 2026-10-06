@@ -1,0 +1,36 @@
+# Image to Prompt - Reverse-Engineering AI Prompts
+
+> Image to Prompt and Video to Prompt reverse-engineer visual media into copy-ready, structured AI prompts and artifact-suppression negative prompts for Midjourney, FLUX, Stable Diffusion 3.5, Runway Gen-3, Luma Dream Machine, Sora, and Gemini.
+
+## Overview
+- **Application Name**: Image to Prompt
+- **Website**: https://ais-dev-rm22uo2fga7gls7427qhmd-266588492875.europe-west2.run.app/
+- **Description**: Upload any image or video clip to deconstruct its composition, optical camera parameters, lighting scheme, textures, and subject kinematics into high-fidelity AI generation prompts.
+- **Privacy Standard**: 100% Zero-Storage Guarantee. Images and video frames are never stored, written to disk, or used for model training.
+
+## Precision Prompt Modes (Image)
+1. **Universal**: General-purpose descriptive prompt optimized across all modern generators (Midjourney v7, FLUX 1.1 Pro, SD 3.5 Large, Gemini).
+2. **Ultra Realistic**: Hyper-authentic optical physics, Hasselblad/Sony sensor specifications, 85mm f/1.4 bokeh, micro skin pores, and 8K RAW fidelity.
+3. **Anime / Manga**: Authentic Japanese cel-shading, dynamic linework, Niji-style character aesthetics, and Makoto Shinkai / Kyoto Animation keyframe lighting.
+4. **Digital Art**: Stylized digital painting, expressive brushwork, volumetric depth, Octane render 3D, and ArtStation trending aesthetic.
+5. **Cartoon / 3D**: Stylized character proportions, Pixar/Disney 3D animation feel, smooth clay subsurface scattering, and whimsical theatrical lighting.
+6. **Midjourney**: Tailored for Midjourney v7 syntax with artistic keywords and parameter flags (`--ar 16:9`, `--v 7 --style raw`).
+7. **FLUX 1.1 Pro / SD 3.5**: Natural language photographic art direction specifying lens focal length, aperture, sensor/film look, and realistic materials.
+8. **Detailed**: Comprehensive descriptive depth covering textures, multi-layer lighting, and subtle geometric nuances.
+
+## AI Video Cinematography Modes
+1. **Universal Video**: Cinematic director prompt extracting camera trajectory, subject momentum, and temporal lighting changes.
+2. **Runway Gen-3 Alpha**: Bracketed camera motion commands (`[Camera: FPV Dive]`), velocity values, and scene transitions.
+3. **Luma Dream Machine**: Emphasizes camera physics, momentum vectors, and continuous spatial trajectory.
+4. **Kling 1.5 / Hailuo**: Focuses on character kinetics, mass, and volumetric atmospheric illumination.
+5. **OpenAI Sora**: Dense narrative cinematography with complex physics and multi-subject temporal choreography.
+6. **Pika 2.0**: Formatted with camera pan/zoom parameters and motion strength modifiers.
+
+## Clean URLs
+- `/` or `/image-to-prompt`: Main Image workspace
+- `/video-to-prompt`: Video to Prompt director workspace
+- `/about`: Architecture & documentation
+- `/privacy`: Zero-storage policy
+- `/sitemap.xml`: Sitemap
+- `/robots.txt`: Search crawler indexing policy
+- `/lms.txt`: This documentation file

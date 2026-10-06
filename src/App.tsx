@@ -12,13 +12,37 @@ import { AnalysisPanel } from './components/AnalysisPanel';
 import { HistoryModal } from './components/HistoryModal';
 import { AboutView } from './components/AboutView';
 import { PrivacyView } from './components/PrivacyView';
+import { VideoGeneratorView } from './components/VideoGeneratorView';
 import { PromptMode, VisualAnalysis, PromptHistoryItem, PageRoute, GeneratePromptResponse } from './types';
-import { Sparkles, ArrowRight, AlertCircle, RefreshCw, Cpu, Layers, Infinity, RotateCcw } from 'lucide-react';
+import { Sparkles, ArrowRight, AlertCircle, RefreshCw, Cpu, Layers, Infinity, RotateCcw, Film } from 'lucide-react';
 
 const MAX_FREE_GENERATIONS = 3;
 const STORAGE_USAGE_KEY = 'i2p_daily_usage';
 const STORAGE_HISTORY_KEY = 'i2p_prompt_history';
 const STORAGE_UNLIMITED_KEY = 'i2p_unlimited_mode';
+
+const PAGE_METADATA: Record<PageRoute, { path: string; title: string; desc: string }> = {
+  generator: {
+    path: '/',
+    title: 'Image to Prompt – Recreate Any Image & Video With AI',
+    desc: 'Upload any image or video to reverse-engineer detailed, copy-ready AI prompts and negative prompts for Midjourney, FLUX, SD 3.5, Runway, Luma, and Sora.',
+  },
+  video_generator: {
+    path: '/video-to-prompt',
+    title: 'Video to Prompt – AI Cinematography & Video Prompt Generator',
+    desc: 'Upload any video clip to extract camera motion trajectories, subject kinetics, and temporal lighting for Runway Gen-3, Luma Dream Machine, Sora, and Kling.',
+  },
+  about: {
+    path: '/about',
+    title: 'About Image to Prompt – AI Prompt Reverse-Engineering Engine',
+    desc: 'Learn how Image to Prompt deconstructs composition, optics, lighting schemes, and textures into precision prompts for top AI generators.',
+  },
+  privacy: {
+    path: '/privacy',
+    title: 'Privacy Policy – Zero-Storage Architecture | Image to Prompt',
+    desc: 'Our zero-storage guarantee ensures your uploaded images and video frames are never stored, saved to disk, or used for model training.',
+  },
+};
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageRoute>('generator');
@@ -35,6 +59,7 @@ export default function App() {
   const [loadingStep, setLoadingStep] = useState<string>('');
   const [isImproving, setIsImproving] = useState(false);
   const [generatedPrompt, setGeneratedPrompt] = useState<string | null>(null);
+  const [negativePrompt, setNegativePrompt] = useState<string>('');
   const [analysis, setAnalysis] = useState<VisualAnalysis | null>(null);
   const [modelUsed, setModelUsed] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -42,6 +67,73 @@ export default function App() {
   // History state
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [history, setHistory] = useState<PromptHistoryItem[]>([]);
+
+  // Synchronize URL, canonical, title, and meta tags
+  const navigateTo = (page: PageRoute, replace = false) => {
+    setActivePage(page);
+    const meta = PAGE_METADATA[page] || PAGE_METADATA.generator;
+
+    if (replace) {
+      window.history.replaceState(null, '', meta.path);
+    } else if (window.location.pathname !== meta.path) {
+      window.history.pushState(null, '', meta.path);
+    }
+
+    // Document title
+    document.title = meta.title;
+
+    // Canonical link
+    const canonicalLink = document.querySelector("link[rel='canonical']");
+    if (canonicalLink) {
+      const origin = window.location.origin || 'https://ais-dev-rm22uo2fga7gls7427qhmd-266588492875.europe-west2.run.app';
+      canonicalLink.setAttribute('href', `${origin}${meta.path === '/' ? '/' : meta.path}`);
+    }
+
+    // Meta descriptions
+    const metaDesc = document.querySelector("meta[name='description']");
+    if (metaDesc) metaDesc.setAttribute('content', meta.desc);
+    const ogDesc = document.querySelector("meta[property='og:description']");
+    if (ogDesc) ogDesc.setAttribute('content', meta.desc);
+    const twDesc = document.querySelector("meta[name='twitter:description']");
+    if (twDesc) twDesc.setAttribute('content', meta.desc);
+
+    // Meta titles
+    const ogTitle = document.querySelector("meta[property='og:title']");
+    if (ogTitle) ogTitle.setAttribute('content', meta.title);
+    const twTitle = document.querySelector("meta[name='twitter:title']");
+    if (twTitle) twTitle.setAttribute('content', meta.title);
+
+    // OG URL
+    const ogUrl = document.querySelector("meta[property='og:url']");
+    if (ogUrl) {
+      const origin = window.location.origin || 'https://ais-dev-rm22uo2fga7gls7427qhmd-266588492875.europe-west2.run.app';
+      ogUrl.setAttribute('content', `${origin}${meta.path === '/' ? '/' : meta.path}`);
+    }
+  };
+
+  // Detect URL slug and popstate listener
+  useEffect(() => {
+    const detectPage = (): PageRoute => {
+      const p = window.location.pathname.toLowerCase();
+      if (p.includes('/video-to-prompt') || p.includes('/video')) return 'video_generator';
+      if (p.includes('/about')) return 'about';
+      if (p.includes('/privacy')) return 'privacy';
+      return 'generator';
+    };
+
+    const initial = detectPage();
+    navigateTo(initial, true);
+
+    const onPopState = () => {
+      const detected = detectPage();
+      setActivePage(detected);
+      const meta = PAGE_METADATA[detected] || PAGE_METADATA.generator;
+      document.title = meta.title;
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   // Load history, usage & unlimited preference from localStorage
   useEffect(() => {
@@ -102,7 +194,12 @@ export default function App() {
   };
 
   // Save item to history
-  const saveToHistory = (promptText: string, analysisObj: VisualAnalysis, model: string) => {
+  const saveToHistory = (
+    promptText: string,
+    analysisObj: VisualAnalysis,
+    model: string,
+    negPrompt?: string
+  ) => {
     if (!selectedImage) return;
     const newItem: PromptHistoryItem = {
       id: `prompt-${Date.now()}`,
@@ -110,6 +207,7 @@ export default function App() {
       thumbnail: selectedImage,
       mode: promptMode,
       prompt: promptText,
+      negativePrompt: negPrompt,
       analysis: analysisObj,
       modelUsed: model,
     };
@@ -137,6 +235,7 @@ export default function App() {
     setImageInfo({ name: 'Loaded from history', size: 'History item' });
     setPromptMode(item.mode);
     setGeneratedPrompt(item.prompt);
+    setNegativePrompt(item.negativePrompt || '');
     setAnalysis(item.analysis);
     setModelUsed(item.modelUsed);
     setActivePage('generator');
@@ -187,10 +286,16 @@ export default function App() {
       }
 
       setGeneratedPrompt(data.prompt);
+      setNegativePrompt(data.negativePrompt || '');
       setAnalysis(data.analysis);
       setModelUsed(data.modelUsed || 'llava-1.5-7b-hf');
       incrementUsage();
-      saveToHistory(data.prompt, data.analysis, data.modelUsed || 'llava-1.5-7b-hf');
+      saveToHistory(
+        data.prompt,
+        data.analysis,
+        data.modelUsed || 'llava-1.5-7b-hf',
+        data.negativePrompt
+      );
 
       // Scroll to results smoothly
       setTimeout(() => {
@@ -238,12 +343,12 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#fafaf9] text-neutral-900 selection:bg-neutral-200">
+    <div className="min-h-screen flex flex-col bg-[#fafaf9] text-neutral-900 selection:bg-neutral-200 overflow-x-hidden">
       {/* App Header */}
       <Header
         activePage={activePage}
         onNavigate={(page) => {
-          setActivePage(page);
+          navigateTo(page);
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         generationsRemaining={generationsRemaining}
@@ -258,15 +363,79 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1">
         {activePage === 'about' && (
-          <AboutView onBack={() => setActivePage('generator')} />
+          <AboutView
+            onBack={() => {
+              navigateTo('generator');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onNavigate={(page) => {
+              navigateTo(page);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
         )}
 
         {activePage === 'privacy' && (
-          <PrivacyView onBack={() => setActivePage('generator')} />
+          <PrivacyView
+            onBack={() => {
+              navigateTo('generator');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onNavigate={(page) => {
+              navigateTo(page);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        )}
+
+        {activePage === 'video_generator' && (
+          <VideoGeneratorView
+            isUnlimited={isUnlimited}
+            generationsRemaining={generationsRemaining}
+            onIncrementUsage={incrementUsage}
+            onSwitchToImage={() => {
+              navigateTo('generator');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
         )}
 
         {activePage === 'generator' && (
           <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+            {/* Top Feature Switcher */}
+            <div className="flex justify-center mb-6">
+              <div className="inline-flex items-center p-1 rounded-2xl bg-neutral-200/70 border border-neutral-300/80 shadow-xs">
+                <a
+                  href="/"
+                  id="tab-image-mode-btn"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigateTo('generator');
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-white text-neutral-900 shadow-xs flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-4 h-4 text-neutral-800" />
+                  <span>Image to Prompt</span>
+                </a>
+                <a
+                  href="/video-to-prompt"
+                  id="tab-video-mode-btn"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigateTo('video_generator');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs sm:text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-all flex items-center gap-1.5"
+                >
+                  <Film className="w-4 h-4 text-blue-600" />
+                  <span>Video to Prompt</span>
+                  <span className="px-1.5 py-0.2 rounded-sm text-[10px] font-mono font-bold bg-blue-600 text-white">
+                    NEW
+                  </span>
+                </a>
+              </div>
+            </div>
+
             {/* Hero Section */}
             <div className="text-center max-w-2xl mx-auto mb-8 sm:mb-10">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-100 text-neutral-800 text-xs font-semibold uppercase tracking-wider mb-4 border border-neutral-200">
@@ -292,9 +461,9 @@ export default function App() {
                     <Infinity className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-xs sm:text-sm text-emerald-950 flex items-center gap-1.5">
+                    <div className="font-semibold text-xs sm:text-sm text-emerald-950 flex items-center gap-1.5">
                       Unlimited Credits Enabled
-                    </h4>
+                    </div>
                     <p className="text-xs text-emerald-800 mt-0.5">
                       You have unlimited prompt generations for full testing freedom.
                     </p>
@@ -315,10 +484,10 @@ export default function App() {
                 className="mb-8 p-4 rounded-2xl bg-amber-50/80 border border-amber-200 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
               >
                 <div>
-                  <h4 className="font-semibold text-sm flex items-center gap-1.5">
+                  <div className="font-semibold text-sm flex items-center gap-1.5">
                     <AlertCircle className="w-4 h-4 text-amber-600" />
                     You've used today's 3 free generations
-                  </h4>
+                  </div>
                   <p className="text-xs text-amber-700 mt-0.5">
                     Click below to restore your 3 credits instantly, or switch to Unlimited testing mode.
                   </p>
@@ -378,13 +547,14 @@ export default function App() {
             )}
 
             {/* Main Interactive Workspace Card */}
+            <h2 className="sr-only">Image Prompt Generation Workspace</h2>
             <div className="bg-white rounded-3xl border border-neutral-200/90 p-5 sm:p-8 shadow-xs space-y-6 sm:space-y-8">
               {/* Step 1: Image Upload */}
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-mono uppercase tracking-wider text-neutral-400 font-semibold">
-                    Step 1
-                  </span>
+                  <h3 className="text-xs font-mono uppercase tracking-wider text-neutral-500 font-semibold">
+                    Step 1: Upload Image
+                  </h3>
                   <span className="text-xs text-neutral-500 font-medium">
                     {selectedImage ? 'Image uploaded' : 'Select image'}
                   </span>
@@ -411,11 +581,11 @@ export default function App() {
               {/* Step 2: Prompt Mode Selector */}
               <div className="pt-6 border-t border-neutral-100">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-mono uppercase tracking-wider text-neutral-400 font-semibold">
-                    Step 2
-                  </span>
+                  <h3 className="text-xs font-mono uppercase tracking-wider text-neutral-500 font-semibold">
+                    Step 2: Choose Generator Target
+                  </h3>
                   <span className="text-xs text-neutral-500 font-medium">
-                    Choose generator target
+                    8 tuned models
                   </span>
                 </div>
 
@@ -428,6 +598,7 @@ export default function App() {
 
               {/* Step 3: Action Trigger */}
               <div className="pt-6 border-t border-neutral-100 flex flex-col items-center">
+                <h3 className="sr-only">Step 3: Generate AI Prompt</h3>
                 {errorMsg && (
                   <div className="w-full mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
@@ -471,9 +642,11 @@ export default function App() {
             {/* Results Section */}
             {generatedPrompt && analysis && (
               <div id="results-section" className="mt-10 sm:mt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                {/* Generated Prompt Card */}
+                <h2 className="sr-only">Reverse-Engineered Prompt Results & Visual Analysis</h2>
+                {/* Generated Prompt Card with Negative Prompt Support */}
                 <PromptResult
                   prompt={generatedPrompt}
+                  negativePrompt={negativePrompt}
                   mode={promptMode}
                   modelUsed={modelUsed}
                   isImproving={isImproving}
@@ -485,6 +658,47 @@ export default function App() {
                 <AnalysisPanel analysis={analysis} />
               </div>
             )}
+
+            {/* Internal Cross-Linking Promotional Section */}
+            <div className="mt-12 p-6 rounded-2xl bg-neutral-100/70 border border-neutral-200">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <div className="font-semibold text-neutral-900 text-sm flex items-center gap-1.5">
+                    <Film className="w-4 h-4 text-blue-600" />
+                    <span>Try Video to Prompt Director Engine</span>
+                    <span className="px-1.5 py-0.2 rounded-xs text-[10px] font-mono font-bold bg-blue-600 text-white">NEW</span>
+                  </div>
+                  <p className="text-xs text-neutral-600 mt-1">
+                    Reverse-engineer video keyframes into camera trajectory and kinetics prompts for Runway Gen-3, Luma Dream Machine, Sora, and Kling.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <a
+                    href="/video-to-prompt"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigateTo('video_generator');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors flex items-center gap-1 shadow-xs"
+                  >
+                    <span>Open Video to Prompt</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </a>
+                  <a
+                    href="/about"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigateTo('about');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="px-3 py-2 rounded-xl bg-white border border-neutral-200 text-neutral-700 hover:bg-neutral-50 text-xs font-medium transition-colors"
+                  >
+                    Prompt Modes Guide
+                  </a>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>
@@ -498,34 +712,76 @@ export default function App() {
         onClearHistory={handleClearHistory}
       />
 
-      {/* Minimal Footer */}
+      {/* Minimal Footer with Semantic Internal Links */}
       <footer id="app-footer" className="mt-auto border-t border-neutral-200 bg-white/70 py-6">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-500">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-neutral-800">Image to Prompt</span>
+            <span className="font-semibold text-neutral-800">Image & Video to Prompt</span>
             <span>•</span>
-            <span>Zero Image Storage Guarantee</span>
+            <span>Zero Image/Video Storage Guarantee</span>
           </div>
 
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setActivePage('generator')}
+          <div className="flex flex-wrap items-center justify-center gap-4">
+            <a
+              href="/"
+              onClick={(e) => {
+                e.preventDefault();
+                navigateTo('generator');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
               className="hover:text-neutral-900 transition-colors"
             >
-              Generator
-            </button>
-            <button
-              onClick={() => setActivePage('about')}
+              Image to Prompt
+            </a>
+            <a
+              href="/video-to-prompt"
+              onClick={(e) => {
+                e.preventDefault();
+                navigateTo('video_generator');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="hover:text-neutral-900 transition-colors"
+            >
+              Video to Prompt
+            </a>
+            <a
+              href="/about"
+              onClick={(e) => {
+                e.preventDefault();
+                navigateTo('about');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
               className="hover:text-neutral-900 transition-colors"
             >
               About
-            </button>
-            <button
-              onClick={() => setActivePage('privacy')}
+            </a>
+            <a
+              href="/privacy"
+              onClick={(e) => {
+                e.preventDefault();
+                navigateTo('privacy');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
               className="hover:text-neutral-900 transition-colors"
             >
               Privacy Policy
-            </button>
+            </a>
+            <a
+              href="/sitemap.xml"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-neutral-900 transition-colors"
+            >
+              Sitemap
+            </a>
+            <a
+              href="/llms.txt"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-neutral-900 transition-colors"
+            >
+              llms.txt
+            </a>
           </div>
         </div>
       </footer>

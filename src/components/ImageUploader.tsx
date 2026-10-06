@@ -144,9 +144,9 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
               <UploadCloud className="w-8 h-8" />
             </div>
 
-            <h3 className="text-lg font-semibold text-neutral-900 mb-1.5">
+            <div className="text-lg font-semibold text-neutral-900 mb-1.5">
               Upload your image
-            </h3>
+            </div>
             <p className="text-neutral-500 text-sm max-w-sm mb-4">
               Drag & drop or click to upload an image to reverse-engineer its visual prompt
             </p>
@@ -181,8 +181,12 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                 >
                   <img
                     src={sample.url}
-                    alt={sample.name}
-                    className="w-10 h-10 rounded-lg object-cover shrink-0 group-hover:scale-105 transition-transform"
+                    alt={`Sample ${sample.category} style: ${sample.name} - ${sample.description}`}
+                    width={40}
+                    height={40}
+                    loading="lazy"
+                    decoding="async"
+                    className="w-10 h-10 rounded-lg object-cover shrink-0 group-hover:scale-105 transition-transform aspect-square"
                     crossOrigin="anonymous"
                   />
                   <div className="min-w-0 pr-1">
@@ -207,8 +211,10 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                 <img
                   id="preview-img-element"
                   src={selectedImage}
-                  alt="Selected upload"
-                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl object-cover border border-neutral-200 shadow-xs"
+                  alt={imageInfo?.name ? `Selected image for prompt analysis: ${imageInfo.name}` : "Selected image preview for reverse engineering"}
+                  width={112}
+                  height={112}
+                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl object-cover border border-neutral-200 shadow-xs aspect-square"
                 />
               </div>
 

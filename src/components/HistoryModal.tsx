@@ -97,8 +97,12 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
                 {item.thumbnail ? (
                   <img
                     src={item.thumbnail}
-                    alt="Prompt source"
-                    className="w-16 h-16 rounded-lg object-cover border border-neutral-200 shrink-0"
+                    alt={`Saved prompt visual thumbnail generated with ${item.mode.replace(/_/g, ' ')} mode`}
+                    width={64}
+                    height={64}
+                    loading="lazy"
+                    decoding="async"
+                    className="w-16 h-16 rounded-lg object-cover border border-neutral-200 shrink-0 aspect-square"
                   />
                 ) : (
                   <div className="w-16 h-16 rounded-lg bg-neutral-100 border border-neutral-200 flex items-center justify-center text-xs text-neutral-400 font-mono shrink-0">
