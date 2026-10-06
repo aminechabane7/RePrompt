@@ -23,22 +23,28 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
 
   const processFile = (file: File) => {
     setErrorMsg(null);
-    const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    const validMimes = ['image/jpeg', 'image/png', 'image/webp'];
 
-    if (!validTypes.includes(file.type)) {
-      setErrorMsg('Unsupported format. Please upload JPG, PNG, or WEBP.');
+    if (!validMimes.includes(file.type.toLowerCase())) {
+      setErrorMsg('Unsupported image format. Allowed formats: image/jpeg, image/png, image/webp.');
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      setErrorMsg('File exceeds 10MB maximum limit. Please select a smaller file.');
+      setErrorMsg('Image exceeds the 10 MB limit.');
       return;
     }
 
     const reader = new FileReader();
+    reader.onerror = () => {
+      setErrorMsg('Failed to read file from your device. Please try again.');
+    };
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
       const img = new Image();
+      img.onerror = () => {
+        setErrorMsg('The image file is corrupted or unreadable. Please choose another file.');
+      };
       img.onload = () => {
         onImageSelected(dataUrl, {
           name: file.name,
@@ -82,24 +88,26 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     if (isLoading) return;
     setErrorMsg(null);
     try {
-      // Fetch sample and convert to dataURL
       const response = await fetch(sample.url);
+      if (!response.ok) throw new Error('Sample fetch failed');
       const blob = await response.blob();
       const reader = new FileReader();
       reader.onloadend = () => {
         const dataUrl = reader.result as string;
-        onImageSelected(dataUrl, {
-          name: `${sample.name}.jpg`,
-          size: `${(blob.size / (1024 * 1024)).toFixed(2)} MB`,
-        });
+        const img = new Image();
+        img.onload = () => {
+          onImageSelected(dataUrl, {
+            name: `${sample.name}.webp`,
+            size: `${(blob.size / (1024 * 1024)).toFixed(2)} MB`,
+            width: img.width,
+            height: img.height,
+          });
+        };
+        img.src = dataUrl;
       };
       reader.readAsDataURL(blob);
     } catch {
-      // Direct URL fallback if fetch CORS issue
-      onImageSelected(sample.url, {
-        name: `${sample.name}.jpg`,
-        size: 'Preset',
-      });
+      setErrorMsg('Failed to load sample image. Please try uploading an image directly.');
     }
   };
 
@@ -109,8 +117,9 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         ref={fileInputRef}
         type="file"
         id="hidden-file-input"
+        aria-label="Upload an image file (JPEG, PNG, or WEBP up to 10MB)"
         accept="image/jpeg,image/png,image/webp"
-        className="hidden"
+        className="sr-only"
         onChange={handleFileChange}
         disabled={isLoading}
       />
@@ -118,6 +127,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
       {errorMsg && (
         <div
           id="upload-error-banner"
+          role="alert"
           className="mb-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-center gap-2.5"
         >
           <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
@@ -130,11 +140,20 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         <div>
           <div
             id="dropzone-area"
+            role="button"
+            tabIndex={0}
+            aria-label="Click or drag and drop to upload an image"
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`cursor-pointer group relative rounded-2xl border-2 border-dashed transition-all duration-200 p-8 sm:p-12 text-center flex flex-col items-center justify-center bg-white ${
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
+            className={`cursor-pointer group relative rounded-2xl border-2 border-dashed transition-all duration-200 p-8 sm:p-12 text-center flex flex-col items-center justify-center bg-white focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-2 ${
               isDragging
                 ? 'border-neutral-900 bg-neutral-50 scale-[0.99]'
                 : 'border-neutral-300 hover:border-neutral-500 hover:bg-neutral-50/50'
@@ -152,13 +171,13 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
             </p>
 
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-100 text-neutral-600 text-xs font-mono">
-              <span>JPG</span>
+              <span>image/jpeg</span>
               <span>•</span>
-              <span>PNG</span>
+              <span>image/png</span>
               <span>•</span>
-              <span>WEBP</span>
+              <span>image/webp</span>
               <span>•</span>
-              <span>Max 10MB</span>
+              <span>Max 10 MB</span>
             </div>
           </div>
 
@@ -167,7 +186,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
             <div className="flex items-center justify-between mb-2.5">
               <span className="text-xs font-medium text-neutral-500 uppercase tracking-wider flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-neutral-400" />
-                Or try a sample image:
+                Or try a local sample image:
               </span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -177,17 +196,17 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                   id={`sample-btn-${sample.id}`}
                   type="button"
                   onClick={() => handleSelectSample(sample)}
-                  className="flex items-center gap-2 p-2 rounded-xl border border-neutral-200 bg-white hover:border-neutral-400 hover:bg-neutral-50 text-left transition-all group overflow-hidden"
+                  aria-label={`Select sample image: ${sample.name} (${sample.category})`}
+                  className="flex items-center gap-2 p-2 rounded-xl border border-neutral-200 bg-white hover:border-neutral-400 hover:bg-neutral-50 text-left transition-all group overflow-hidden focus:outline-none focus:ring-2 focus:ring-neutral-900"
                 >
                   <img
                     src={sample.url}
-                    alt={`Sample ${sample.category} style: ${sample.name} - ${sample.description}`}
+                    alt={`Sample ${sample.category} visual: ${sample.name}`}
                     width={40}
                     height={40}
                     loading="lazy"
                     decoding="async"
                     className="w-10 h-10 rounded-lg object-cover shrink-0 group-hover:scale-105 transition-transform aspect-square"
-                    crossOrigin="anonymous"
                   />
                   <div className="min-w-0 pr-1">
                     <p className="text-xs font-medium text-neutral-900 truncate leading-tight">
@@ -211,7 +230,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                 <img
                   id="preview-img-element"
                   src={selectedImage}
-                  alt={imageInfo?.name ? `Selected image for prompt analysis: ${imageInfo.name}` : "Selected image preview for reverse engineering"}
+                  alt={imageInfo?.name ? `Selected image for prompt analysis: ${imageInfo.name}` : 'Uploaded image preview'}
                   width={112}
                   height={112}
                   className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl object-cover border border-neutral-200 shadow-xs aspect-square"
@@ -222,7 +241,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                 <div className="flex items-center gap-2 mb-1">
                   <ImageIcon className="w-4 h-4 text-neutral-500 shrink-0" />
                   <span className="text-sm font-semibold text-neutral-900 truncate max-w-[200px] sm:max-w-xs">
-                    {imageInfo?.name || 'Selected Image'}
+                    {imageInfo?.name || 'Uploaded Image'}
                   </span>
                 </div>
 

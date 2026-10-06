@@ -56,12 +56,17 @@ export interface GeneratePromptResponse {
   targetEngine?: TargetEngine;
   detailLevel?: DetailLevel;
   error?: string;
+  creditsRemaining?: number;
+  generationsUsed?: number;
 }
 
+/**
+ * Prompt history item strictly storing metadata only.
+ * IMPORTANT PRIVACY RULE: Never store original image or Base64 data here.
+ */
 export interface PromptHistoryItem {
   id: string;
   timestamp: number;
-  thumbnail: string;
   mode: PromptMode;
   targetEngine?: TargetEngine;
   detailLevel?: DetailLevel;
@@ -103,7 +108,6 @@ export interface GenerateVideoPromptResponse {
 export interface VideoHistoryItem {
   id: string;
   timestamp: number;
-  thumbnail: string;
   videoName: string;
   mode: VideoPromptMode;
   prompt: string;
@@ -120,3 +124,21 @@ export type PageRoute =
   | 'privacy'
   | 'terms'
   | 'contact';
+
+/**
+ * Supabase User Profile & Usage Types
+ */
+export interface UserProfile {
+  id: string;
+  email?: string;
+  displayName?: string;
+  plan: 'free' | 'pro' | 'unlimited';
+  createdAt?: string;
+}
+
+export interface UserUsage {
+  userId: string;
+  generationsUsed: number;
+  generationLimit: number;
+  remaining: number;
+}

@@ -1,33 +1,29 @@
 import React from 'react';
-import { Sparkles, History, Shield, Info, ArrowUpRight, Infinity, RotateCcw } from 'lucide-react';
+import { Sparkles, History, User, LogIn, Zap, LogOut } from 'lucide-react';
 import { PageRoute } from '../types';
+import { useAuth } from '../lib/AuthContext';
 
 interface HeaderProps {
   activePage: PageRoute;
   onNavigate: (page: PageRoute) => void;
-  generationsRemaining: number;
-  maxGenerations: number;
-  isUnlimited: boolean;
-  onToggleUnlimited: () => void;
-  onResetCredits: () => void;
-  historyCount: number;
   onOpenHistory: () => void;
+  onOpenAuthModal: (mode: 'signin' | 'signup') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   activePage,
   onNavigate,
-  generationsRemaining,
-  maxGenerations,
-  isUnlimited,
-  onToggleUnlimited,
-  onResetCredits,
-  historyCount,
   onOpenHistory,
+  onOpenAuthModal,
 }) => {
+  const { user, profile, usage, isConfigured } = useAuth();
+
+  const remaining = usage ? Math.max(0, usage.generationLimit - usage.generationsUsed) : 3;
+  const isFreePlan = (profile?.plan || 'free') === 'free';
+
   return (
     <header id="app-header" className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-neutral-200/80">
-      <div className="max-w-6xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         {/* Brand */}
         <div className="flex items-center gap-4 sm:gap-6">
           <a
@@ -43,17 +39,17 @@ export const Header: React.FC<HeaderProps> = ({
               <Sparkles className="w-4 h-4 text-neutral-200" />
             </div>
             <div>
-              <span className="font-semibold text-neutral-900 tracking-tight text-base sm:text-lg">
-                Image to Prompt
+              <span className="font-bold text-neutral-900 tracking-tight text-base sm:text-lg">
+                RePrompt
               </span>
-              <span className="hidden lg:inline-block ml-2 text-xs font-mono px-1.5 py-0.5 rounded-sm bg-neutral-100 text-neutral-600 border border-neutral-200">
-                v1.0 MVP
+              <span className="hidden sm:inline-block ml-2 text-[11px] font-mono px-1.5 py-0.5 rounded-sm bg-neutral-100 text-neutral-600 border border-neutral-200">
+                AI Vision
               </span>
             </div>
           </a>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-1 pl-4 border-l border-neutral-200">
+          <nav className="hidden md:flex items-center gap-1 pl-4 border-l border-neutral-200 text-xs sm:text-sm font-medium">
             <a
               href="/"
               id="nav-generator"
@@ -61,13 +57,13 @@ export const Header: React.FC<HeaderProps> = ({
                 e.preventDefault();
                 onNavigate('generator');
               }}
-              className={`px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
+              className={`px-3 py-2 rounded-md transition-colors ${
                 activePage === 'generator'
                   ? 'bg-neutral-100 text-neutral-900 font-semibold'
                   : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
               }`}
             >
-              <span>Image to Prompt</span>
+              Image to Prompt
             </a>
             <a
               href="/video-to-prompt"
@@ -76,16 +72,13 @@ export const Header: React.FC<HeaderProps> = ({
                 e.preventDefault();
                 onNavigate('video_generator');
               }}
-              className={`px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
+              className={`px-3 py-2 rounded-md transition-colors ${
                 activePage === 'video_generator'
-                  ? 'bg-blue-50 text-blue-900 font-semibold border border-blue-200'
+                  ? 'bg-neutral-100 text-neutral-900 font-semibold'
                   : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
               }`}
             >
-              <span>Video to Prompt</span>
-              <span className="px-1.5 py-0.2 rounded-sm text-[10px] font-mono font-semibold bg-blue-600 text-white leading-none">
-                NEW
-              </span>
+              Video to Prompt
             </a>
             <a
               href="/about"
@@ -94,7 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
                 e.preventDefault();
                 onNavigate('about');
               }}
-              className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`px-3 py-2 rounded-md transition-colors ${
                 activePage === 'about'
                   ? 'bg-neutral-100 text-neutral-900 font-semibold'
                   : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
@@ -109,7 +102,7 @@ export const Header: React.FC<HeaderProps> = ({
                 e.preventDefault();
                 onNavigate('privacy');
               }}
-              className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`px-3 py-2 rounded-md transition-colors ${
                 activePage === 'privacy'
                   ? 'bg-neutral-100 text-neutral-900 font-semibold'
                   : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
@@ -117,133 +110,89 @@ export const Header: React.FC<HeaderProps> = ({
             >
               Privacy
             </a>
+            <a
+              href="/terms"
+              id="nav-terms"
+              onClick={(e) => {
+                e.preventDefault();
+                onNavigate('terms');
+              }}
+              className={`px-3 py-2 rounded-md transition-colors ${
+                activePage === 'terms'
+                  ? 'bg-neutral-100 text-neutral-900 font-semibold'
+                  : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+              }`}
+            >
+              Terms
+            </a>
           </nav>
         </div>
 
-        {/* Right tools */}
-        <div className="flex items-center gap-2">
-          {/* Generations Limit Tracker & Unlimited Badge */}
-          {isUnlimited ? (
-            <button
-              id="unlimited-credits-badge"
-              type="button"
-              onClick={onToggleUnlimited}
-              title="Unlimited testing credits active. Click to toggle daily limit mode."
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 min-h-[38px] rounded-full text-xs font-semibold bg-emerald-50 border border-emerald-300 text-emerald-800 hover:bg-emerald-100 transition-colors shadow-xs"
+        {/* Right Tools (Auth + History + Usage) */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Real Server Usage Badge (when logged in) */}
+          {user && (
+            <div
+              id="server-usage-badge"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 bg-neutral-50 text-neutral-800 text-xs font-mono"
             >
-              <Infinity className="w-4 h-4 text-emerald-600" />
-              <span className="hidden xs:inline">Unlimited</span>
-              <span className="xs:hidden">∞</span>
-            </button>
-          ) : (
-            <div className="flex items-center gap-1">
-              <div
-                id="generations-counter"
-                title="Anonymous Free Tier Daily Limit"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 min-h-[38px] rounded-full text-xs font-medium bg-neutral-100 border border-neutral-200 text-neutral-700"
-              >
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    generationsRemaining > 0 ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'
-                  }`}
-                />
-                <span className="hidden sm:inline">
-                  {generationsRemaining}/{maxGenerations} free
-                </span>
-                <span className="sm:hidden font-mono">
-                  {generationsRemaining}/{maxGenerations}
-                </span>
-              </div>
-              <button
-                id="header-reset-credits"
-                type="button"
-                onClick={onResetCredits}
-                title="Regenerate credit to 3"
-                className="p-2 sm:px-2 sm:py-1 min-h-[38px] text-xs font-medium bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md border border-neutral-200 flex items-center justify-center gap-1 transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Reset</span>
-              </button>
+              <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span>
+                <strong>{remaining}</strong> left
+              </span>
             </div>
           )}
 
-          {/* Prompt History Button */}
+          {/* History Button */}
           <button
-            id="history-drawer-toggle"
+            id="header-history-button"
+            type="button"
             onClick={onOpenHistory}
-            className="relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 min-h-[38px] rounded-lg border border-neutral-200 text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 text-xs sm:text-sm font-medium transition-all"
-            aria-label="View prompt history"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-xs font-medium transition-colors shadow-2xs"
+            aria-label="Open prompt history"
           >
-            <History className="w-4 h-4 text-neutral-500" />
-            <span className="hidden sm:inline">History</span>
-            {historyCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-neutral-900 text-white font-mono">
-                {historyCount}
-              </span>
-            )}
+            <History className="w-3.5 h-3.5 text-neutral-600" />
+            <span className="hidden xs:inline">History</span>
           </button>
-        </div>
-      </div>
 
-      {/* Mobile Sub-Navigation Bar */}
-      <div className="md:hidden border-t border-neutral-200/80 bg-neutral-50/70 px-3 py-1.5 flex items-center justify-around text-xs">
-        <a
-          href="/"
-          onClick={(e) => {
-            e.preventDefault();
-            onNavigate('generator');
-          }}
-          className={`py-1 px-2 rounded font-medium transition-colors ${
-            activePage === 'generator'
-              ? 'text-neutral-900 font-bold bg-white shadow-2xs'
-              : 'text-neutral-600 hover:text-neutral-900'
-          }`}
-        >
-          Image
-        </a>
-        <a
-          href="/video-to-prompt"
-          onClick={(e) => {
-            e.preventDefault();
-            onNavigate('video_generator');
-          }}
-          className={`py-1 px-2 rounded font-medium transition-colors flex items-center gap-1 ${
-            activePage === 'video_generator'
-              ? 'text-blue-900 font-bold bg-white shadow-2xs'
-              : 'text-neutral-600 hover:text-neutral-900'
-          }`}
-        >
-          <span>Video</span>
-          <span className="text-[9px] bg-blue-600 text-white px-1 py-0.2 rounded-xs font-mono">NEW</span>
-        </a>
-        <a
-          href="/about"
-          onClick={(e) => {
-            e.preventDefault();
-            onNavigate('about');
-          }}
-          className={`py-1 px-2 rounded font-medium transition-colors ${
-            activePage === 'about'
-              ? 'text-neutral-900 font-bold bg-white shadow-2xs'
-              : 'text-neutral-600 hover:text-neutral-900'
-          }`}
-        >
-          About
-        </a>
-        <a
-          href="/privacy"
-          onClick={(e) => {
-            e.preventDefault();
-            onNavigate('privacy');
-          }}
-          className={`py-1 px-2 rounded font-medium transition-colors ${
-            activePage === 'privacy'
-              ? 'text-neutral-900 font-bold bg-white shadow-2xs'
-              : 'text-neutral-600 hover:text-neutral-900'
-          }`}
-        >
-          Privacy
-        </a>
+          {/* Authentication Controls */}
+          {user ? (
+            /* Logged In User Pill */
+            <button
+              id="header-account-button"
+              type="button"
+              onClick={() => onNavigate('account' as any)}
+              className="flex items-center gap-2 pl-2 pr-3 py-1 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-xs font-semibold text-neutral-900 transition-colors shadow-2xs"
+            >
+              <div className="w-6 h-6 rounded-lg bg-neutral-900 text-white flex items-center justify-center text-[11px] font-bold">
+                {(profile?.displayName?.[0] || user.email?.[0] || 'U').toUpperCase()}
+              </div>
+              <span className="max-w-[100px] truncate hidden sm:inline">
+                {profile?.displayName || user.email?.split('@')[0]}
+              </span>
+            </button>
+          ) : (
+            /* Logged Out Actions */
+            <div className="flex items-center gap-1.5">
+              <button
+                id="header-signin-button"
+                type="button"
+                onClick={() => onOpenAuthModal('signin')}
+                className="px-3 py-1.5 rounded-xl text-neutral-700 hover:text-neutral-900 text-xs font-medium transition-colors"
+              >
+                Sign In
+              </button>
+              <button
+                id="header-signup-button"
+                type="button"
+                onClick={() => onOpenAuthModal('signup')}
+                className="px-3.5 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-semibold transition-colors shadow-xs"
+              >
+                Sign Up
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

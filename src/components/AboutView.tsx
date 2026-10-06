@@ -9,11 +9,10 @@ import {
   Cpu,
   Palette,
   Wand2,
-  Smile,
   Camera,
   Film,
   ArrowRight,
-  Lock,
+  Sliders,
 } from 'lucide-react';
 import { PageRoute } from '../types';
 
@@ -51,160 +50,95 @@ export const AboutView: React.FC<AboutViewProps> = ({ onBack, onNavigate }) => {
       <div className="mb-10">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-100 text-neutral-800 text-xs font-medium mb-3">
           <Sparkles className="w-3.5 h-3.5" />
-          <span>Product Philosophy</span>
+          <span>Product Overview</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold text-neutral-900 tracking-tight mb-4">
-          Recreate Any Image With AI
+          About RePrompt
         </h1>
         <p className="text-base sm:text-lg text-neutral-600 leading-relaxed">
-          Most vision tools merely describe what an image looks like. Image to Prompt reverses the generation process: it deconstructs composition, optics, lighting schemes, and textures into an exact, copy-ready prompt you can feed into Midjourney, Flux, SD 3.5, or Gemini.
+          RePrompt is a visual reverse-engineering engine for AI creators. Rather than providing generic image captions, it deconstructs composition, estimated optics, lighting schemes, materials, and textures into prompts tailored to recreate visually similar results in modern AI image generators.
         </p>
       </div>
 
       {/* Core Concept */}
       <div className="rounded-2xl border border-neutral-200 bg-neutral-50/70 p-6 mb-10">
-        <h2 className="text-lg font-bold text-neutral-900 mb-2">
-          The Core Value Proposition
+        <h2 className="text-base font-bold text-neutral-900 mb-2">
+          Visual Reproduction Architecture
         </h2>
-        <blockquote className="border-l-2 border-neutral-900 pl-4 my-3 text-neutral-800 font-medium italic text-base">
-          “Upload any image → AI analyzes it → Get a detailed prompt you can use to recreate a similar image with Midjourney, Flux, Stable Diffusion, Gemini, or other image generators.”
+        <blockquote className="border-l-2 border-neutral-900 pl-4 my-3 text-neutral-800 font-medium italic text-sm sm:text-base">
+          “Upload an image → Deconstruct visual dimensions → Receive a prompt formatted for Midjourney, FLUX, SD 3.5, or Gemini.”
         </blockquote>
-        <p className="text-sm text-neutral-600 leading-relaxed mt-3">
-          The goal is not generic descriptive captions like “a cat sitting on a couch”. Our vision pipeline breaks down camera lenses (focal length, depth of field), specific light directionality, artistic genre, colour theory, and materials.
+        <p className="text-xs sm:text-sm text-neutral-600 leading-relaxed mt-3">
+          Our vision pipeline focuses on visual characteristics that impact image generation: estimated lens looks, depth-of-field appearance, key and rim lighting direction, color temperature, and surface finishes.
         </p>
       </div>
 
-      {/* Prompt Modes Explained */}
+      {/* Target Engines */}
       <div className="mb-10">
-        <h2 className="text-xl font-bold text-neutral-900 mb-5">
-          8 Precision Prompt Modes
+        <h2 className="text-lg font-bold text-neutral-900 mb-4 flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-neutral-700" />
+          <span>Supported Target AI Engines</span>
         </h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="p-4 rounded-xl border border-neutral-200 bg-white">
-            <div className="flex items-center gap-2 mb-2">
-              <Globe className="w-4 h-4 text-neutral-700" />
-              <h3 className="font-semibold text-neutral-900 text-sm">Universal</h3>
-            </div>
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Standardized prompt designed to perform reliably across all modern image generators (Midjourney, Flux, SD 3.5, Gemini) without tool-specific flags.
+            <h3 className="font-semibold text-neutral-900 text-sm mb-1">Midjourney v7</h3>
+            <p className="text-xs text-neutral-600">
+              Concise visual language with automatic parameters (<code className="font-mono text-[11px] bg-neutral-100 px-1 py-0.5 rounded">--ar</code>, <code className="font-mono text-[11px] bg-neutral-100 px-1 py-0.5 rounded">--v 7</code>, and <code className="font-mono text-[11px] bg-neutral-100 px-1 py-0.5 rounded">--style raw</code> for photography).
             </p>
           </div>
-
           <div className="p-4 rounded-xl border border-neutral-200 bg-white">
-            <div className="flex items-center gap-2 mb-2">
-              <Camera className="w-4 h-4 text-neutral-700" />
-              <h3 className="font-semibold text-neutral-900 text-sm">Ultra Realistic</h3>
-            </div>
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Optical hyper-realism specifying Hasselblad or Sony high-resolution camera rigs, true 85mm optical bokeh, micro skin pores, subsurface scattering, and raw uncompressed photographic realism.
+            <h3 className="font-semibold text-neutral-900 text-sm mb-1">FLUX 1.1 Pro</h3>
+            <p className="text-xs text-neutral-600">
+              Natural descriptive language art direction, optical descriptions, and lighting physics without parameter flags.
             </p>
           </div>
-
           <div className="p-4 rounded-xl border border-neutral-200 bg-white">
-            <div className="flex items-center gap-2 mb-2">
-              <Wand2 className="w-4 h-4 text-neutral-700" />
-              <h3 className="font-semibold text-neutral-900 text-sm">Anime / Manga</h3>
-            </div>
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Authentic Japanese animation and manga styling: clean cel shading, expressive eyes and dynamic hair, anime color balance, and Makoto Shinkai / Kyoto Animation keyframe backgrounds.
+            <h3 className="font-semibold text-neutral-900 text-sm mb-1">Stable Diffusion 3.5 Large</h3>
+            <p className="text-xs text-neutral-600">
+              Structured descriptive clauses, balanced lighting modifiers, and focused negative prompts to prevent anatomical glitches.
             </p>
           </div>
-
           <div className="p-4 rounded-xl border border-neutral-200 bg-white">
-            <div className="flex items-center gap-2 mb-2">
-              <Palette className="w-4 h-4 text-neutral-700" />
-              <h3 className="font-semibold text-neutral-900 text-sm">Digital Art</h3>
-            </div>
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Stylized digital painting and concept art: rich brushwork texture, volumetric fantasy lighting, Octane render 3D depth, and trending ArtStation aesthetic values.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl border border-neutral-200 bg-white">
-            <div className="flex items-center gap-2 mb-2">
-              <Smile className="w-4 h-4 text-neutral-700" />
-              <h3 className="font-semibold text-neutral-900 text-sm">Cartoon / 3D</h3>
-            </div>
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Playful stylized animation: 3D Pixar / Disney style characters with smooth clay subsurface scattering, whimsical proportions, bold outlines, and cheerful theatrical lighting.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl border border-neutral-200 bg-white">
-            <div className="flex items-center gap-2 mb-2">
-              <Sparkles className="w-4 h-4 text-neutral-700" />
-              <h3 className="font-semibold text-neutral-900 text-sm">Midjourney</h3>
-            </div>
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Formulated for Midjourney v7 syntax. Emphasizes artistic rendering terms, cinematic aesthetics, and includes recommended parameters such as <code className="bg-neutral-100 px-1 py-0.5 rounded text-[11px] font-mono">--ar 16:9</code> and <code className="bg-neutral-100 px-1 py-0.5 rounded text-[11px] font-mono">--v 7 --style raw</code>.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl border border-neutral-200 bg-white">
-            <div className="flex items-center gap-2 mb-2">
-              <SlidersHorizontal className="w-4 h-4 text-neutral-700" />
-              <h3 className="font-semibold text-neutral-900 text-sm">FLUX 1.1 Pro / SD 3.5 Large</h3>
-            </div>
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Tailored for Black Forest Labs FLUX 1.1 Pro (with Ultra and RAW modes) and Stability AI's Stable Diffusion 3.5 Large. Uses natural photographic language, explicit camera specs, and realistic lighting.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl border border-neutral-200 bg-white">
-            <div className="flex items-center gap-2 mb-2">
-              <Layers className="w-4 h-4 text-neutral-700" />
-              <h3 className="font-semibold text-neutral-900 text-sm">Detailed</h3>
-            </div>
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Maximum descriptive depth. Captures intricate textures, micro-lighting nuances, layered garments, architectural geometry, and complex environmental backdrops.
+            <h3 className="font-semibold text-neutral-900 text-sm mb-1">DALL-E 3 & Gemini</h3>
+            <p className="text-xs text-neutral-600">
+              Fluent descriptive paragraphs emphasizing spatial relationships, ambiance, and subject appearance.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Video to Prompt & Negative Prompt Section */}
-      <div className="mb-10 p-5 sm:p-6 rounded-2xl bg-blue-50/70 border border-blue-200/80">
-        <h2 className="text-base sm:text-lg font-bold text-blue-950 mb-2 flex items-center gap-2">
-          <Film className="w-5 h-5 text-blue-600" />
-          <span>New: Video to Prompt & Negative Prompt Synthesis</span>
+      {/* Detail Levels */}
+      <div className="mb-10">
+        <h2 className="text-lg font-bold text-neutral-900 mb-4 flex items-center gap-2">
+          <Sliders className="w-4 h-4 text-neutral-700" />
+          <span>Detail Level Options</span>
         </h2>
-        <p className="text-xs sm:text-sm text-blue-900/90 leading-relaxed mb-4">
-          In addition to still images, the engine now supports full multi-frame video reverse-engineering and negative prompt generation for both media formats:
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-neutral-800">
-          <div className="bg-white/80 p-3.5 rounded-xl border border-blue-100">
-            <h3 className="font-semibold text-neutral-900 mb-1">🎬 Video to Prompt Engine</h3>
-            <p className="text-neutral-600">
-              Extracts cinematic camera trajectories (dolly, orbit, tilt, fpv dive), subject kinematic speed, temporal pacing, and lighting changes across video keyframes for Runway Gen-3, Luma Dream Machine, Sora, and Kling.
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-4 rounded-xl border border-neutral-200 bg-white">
+            <h3 className="font-semibold text-neutral-900 text-sm mb-1">Simple</h3>
+            <p className="text-xs text-neutral-600">
+              Short, high-impact prompt (1-2 sentences) prioritizing the primary subject, main style, and lighting.
             </p>
           </div>
-          <div className="bg-white/80 p-3.5 rounded-xl border border-blue-100">
-            <h3 className="font-semibold text-neutral-900 mb-1">🛡️ Intelligent Negative Prompts</h3>
-            <p className="text-neutral-600">
-              Both Image and Video pipelines automatically formulate targeted negative prompts to suppress motion flicker, limb warping, plastic skin, chromatic distortion, and AI morphing artifacts.
+          <div className="p-4 rounded-xl border border-neutral-200 bg-white">
+            <h3 className="font-semibold text-neutral-900 text-sm mb-1">Detailed</h3>
+            <p className="text-xs text-neutral-600">
+              Balanced prompt (3-4 sentences) covering subject, composition, environment, colors, and textures.
+            </p>
+          </div>
+          <div className="p-4 rounded-xl border border-neutral-200 bg-white">
+            <h3 className="font-semibold text-neutral-900 text-sm mb-1">Professional</h3>
+            <p className="text-xs text-neutral-600">
+              Structured high-fidelity prompt with technical visual details, estimated lens look, and surface finishes.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Model Engine */}
-      <div className="rounded-2xl border border-neutral-200 bg-white p-6 mb-10">
-        <div className="flex items-center gap-2.5 mb-3">
-          <Cpu className="w-5 h-5 text-neutral-700" />
-          <h2 className="text-base font-bold text-neutral-900">
-            Vision Architecture: Multimodal Open & Gemini Models
-          </h2>
-        </div>
-        <p className="text-xs sm:text-sm text-neutral-600 leading-relaxed">
-          The reverse-engineering backend leverages vision models including <strong className="text-neutral-900">Ling 3.0 Flash VL</strong> and <strong className="text-neutral-900">Qwen 2.5 VL 72B</strong> routed through OpenRouter, backed by high-throughput multimodal intelligence via Google Gemini 3.8 Flash. This multi-model architecture provides both specialized open-weight reverse engineering and seamless zero-downtime fallback.
-        </p>
-      </div>
-
-      {/* Internal Navigation Links */}
-      <div className="p-6 rounded-2xl bg-neutral-100/80 border border-neutral-200">
-        <h2 className="text-sm font-bold text-neutral-900 uppercase tracking-wider mb-3">
-          Explore Image to Prompt
+      {/* Cross Links */}
+      <div className="p-6 rounded-2xl bg-neutral-100/80 border border-neutral-200 mb-6">
+        <h2 className="text-xs font-bold text-neutral-900 uppercase tracking-wider mb-3">
+          Explore Other Pages
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <a
@@ -216,18 +150,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onBack, onNavigate }) => {
             className="p-3 bg-white rounded-xl border border-neutral-200 hover:border-neutral-400 text-xs font-medium text-neutral-900 flex items-center justify-between transition-colors shadow-2xs group"
           >
             <span>Image to Prompt</span>
-            <ArrowRight className="w-3.5 h-3.5 text-neutral-400 group-hover:translate-x-0.5 transition-transform" />
-          </a>
-          <a
-            href="/video-to-prompt"
-            onClick={(e) => {
-              e.preventDefault();
-              handleNav('video_generator');
-            }}
-            className="p-3 bg-white rounded-xl border border-neutral-200 hover:border-neutral-400 text-xs font-medium text-neutral-900 flex items-center justify-between transition-colors shadow-2xs group"
-          >
-            <span>Video to Prompt</span>
-            <ArrowRight className="w-3.5 h-3.5 text-blue-500 group-hover:translate-x-0.5 transition-transform" />
+            <Sparkles className="w-3.5 h-3.5 text-neutral-600" />
           </a>
           <a
             href="/privacy"
@@ -238,7 +161,18 @@ export const AboutView: React.FC<AboutViewProps> = ({ onBack, onNavigate }) => {
             className="p-3 bg-white rounded-xl border border-neutral-200 hover:border-neutral-400 text-xs font-medium text-neutral-900 flex items-center justify-between transition-colors shadow-2xs group"
           >
             <span>Privacy Policy</span>
-            <Lock className="w-3.5 h-3.5 text-emerald-600" />
+            <ShieldCheck className="w-3.5 h-3.5 text-neutral-600" />
+          </a>
+          <a
+            href="/contact"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('contact');
+            }}
+            className="p-3 bg-white rounded-xl border border-neutral-200 hover:border-neutral-400 text-xs font-medium text-neutral-900 flex items-center justify-between transition-colors shadow-2xs group"
+          >
+            <span>Contact</span>
+            <ArrowRight className="w-3.5 h-3.5 text-neutral-600" />
           </a>
         </div>
       </div>

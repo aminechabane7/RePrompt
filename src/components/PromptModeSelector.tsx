@@ -1,6 +1,20 @@
 import React from 'react';
 import { PromptMode } from '../types';
-import { Globe, Layers, SlidersHorizontal, Sparkles, Palette, Wand2, Smile, Camera } from 'lucide-react';
+import {
+  Globe,
+  Camera,
+  Wand2,
+  Palette,
+  Smile,
+  Film,
+  Package,
+  User,
+  Scissors,
+  Layers,
+  Building2,
+  Home,
+  Share2,
+} from 'lucide-react';
 
 interface PromptModeSelectorProps {
   selectedMode: PromptMode;
@@ -13,74 +27,93 @@ interface ModeOption {
   name: string;
   badge: string;
   description: string;
-  targetEngines: string;
   icon: React.ComponentType<{ className?: string }>;
 }
 
 const MODES: ModeOption[] = [
   {
-    id: 'universal',
-    name: 'Universal',
-    badge: 'Recommended',
-    description: 'Clean, balanced prompt effective across any AI image generator.',
-    targetEngines: 'Midjourney v7, FLUX, SD 3.5, Gemini',
+    id: 'general',
+    name: 'General',
+    badge: 'Universal',
+    description: 'Balanced visual deconstruction suitable for any AI image generator.',
     icon: Globe,
   },
   {
-    id: 'ultra_realistic',
-    name: 'Ultra Realistic',
-    badge: 'Photoreal',
-    description: 'Hyper-authentic optical physics, skin pores, natural imperfections & RAW optics.',
-    targetEngines: 'Hasselblad/Sony optics, 8K RAW, Leica look',
+    id: 'photorealistic',
+    name: 'Photorealistic',
+    badge: 'Optics',
+    description: 'Estimated lens equivalent, natural skin textures, catchlights & lighting falloff.',
     icon: Camera,
+  },
+  {
+    id: 'cinematic',
+    name: 'Cinematic',
+    badge: 'Film Still',
+    description: 'Widescreen framing, directional contrast, volumetric haze & film color grading.',
+    icon: Film,
+  },
+  {
+    id: 'product_photography',
+    name: 'Product Photo',
+    badge: 'Studio',
+    description: 'Diffused studio lighting, tactile material finishes & clean product isolation.',
+    icon: Package,
+  },
+  {
+    id: 'portrait',
+    name: 'Portrait',
+    badge: 'Close-Up',
+    description: 'Facial expressions, estimated focal length look, shallow depth & skin tones.',
+    icon: User,
+  },
+  {
+    id: 'fashion',
+    name: 'Fashion',
+    badge: 'Editorial',
+    description: 'Garment fabric drape, haute couture styling, posing & deliberate lighting.',
+    icon: Scissors,
   },
   {
     id: 'anime',
     name: 'Anime / Manga',
-    badge: 'Niji Style',
-    description: 'Japanese animation aesthetic, vibrant cel shading, clean linework & dramatic lighting.',
-    targetEngines: 'Midjourney Niji, NovelAI, Anime SDXL',
+    badge: 'Japanese',
+    description: 'Authentic cel shading, expressive linework & illustrative background depth.',
     icon: Wand2,
   },
   {
-    id: 'digital_art',
-    name: 'Digital Art',
+    id: 'illustration',
+    name: 'Illustration',
     badge: 'Concept Art',
-    description: 'Stylized digital painting, expressive brushwork, volumetric concept art & Octane depth.',
-    targetEngines: 'ArtStation trending, Octane, Procreate',
+    description: 'Expressive brushwork, textural layering, imaginative palette & stylized tones.',
     icon: Palette,
   },
   {
-    id: 'cartoon',
-    name: 'Cartoon / 3D',
-    badge: 'Animation',
-    description: 'Playful character silhouettes, Pixar/Disney 3D clay subsurface rendering & vivid charm.',
-    targetEngines: '3D Pixar/Disney style, 2D Toon, Claymation',
-    icon: Smile,
-  },
-  {
-    id: 'midjourney',
-    name: 'Midjourney',
-    badge: 'v7 Style',
-    description: 'Optimized for Midjourney v7 syntax, atmospheric descriptors & modern parameters.',
-    targetEngines: 'Midjourney v7 / v8 / Niji',
-    icon: Sparkles,
-  },
-  {
-    id: 'flux',
-    name: 'Flux 1.1 / SD 3.5',
-    badge: 'Latest Gen',
-    description: 'Structured photographic & art direction for FLUX 1.1 Pro and SD 3.5 Large.',
-    targetEngines: 'FLUX 1.1 Pro, FLUX.1, SD 3.5 Large',
-    icon: SlidersHorizontal,
-  },
-  {
-    id: 'detailed',
-    name: 'Detailed',
-    badge: 'Max Depth',
-    description: 'Maximum visual detail, exhaustive textures, material finishes & micro nuances.',
-    targetEngines: 'High-detail renders & descriptive engines',
+    id: 'render_3d',
+    name: '3D Render',
+    badge: 'Raytrace',
+    description: 'Ambient occlusion look, subsurface light scattering & physically based materials.',
     icon: Layers,
+  },
+  {
+    id: 'architecture',
+    name: 'Architecture',
+    badge: 'Structural',
+    description: 'Linear perspective, daylight geometry & structural building finishes.',
+    icon: Building2,
+  },
+  {
+    id: 'interior_design',
+    name: 'Interior',
+    badge: 'Staging',
+    description: 'Spatial layout, ambient interior illumination, textiles & lived-in atmosphere.',
+    icon: Home,
+  },
+  {
+    id: 'social_media',
+    name: 'Social Creative',
+    badge: 'High Impact',
+    description: 'Focal subject, vibrant modern palette, clean contrast & engaging clarity.',
+    icon: Share2,
   },
 ];
 
@@ -91,80 +124,68 @@ export const PromptModeSelector: React.FC<PromptModeSelectorProps> = ({
 }) => {
   return (
     <div id="prompt-mode-selector" className="w-full">
-      <div className="flex items-center justify-between mb-3">
-        <label className="text-sm font-semibold text-neutral-900 flex items-center gap-2">
-          <span>Prompt Style</span>
+      <div className="flex items-center justify-between mb-2">
+        <label className="text-xs font-semibold text-neutral-900 uppercase tracking-wider flex items-center gap-1.5">
+          <span>Visual Style Mode</span>
         </label>
-        <span className="text-xs text-neutral-500 font-mono">
-          8 specialized generation styles
+        <span className="text-[11px] text-neutral-500 font-mono">
+          12 specialized visual categories
         </span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
         {MODES.map((mode) => {
-          const isSelected = selectedMode === mode.id;
+          const isSelected =
+            selectedMode === mode.id ||
+            (selectedMode === 'universal' && mode.id === 'general') ||
+            (selectedMode === 'ultra_realistic' && mode.id === 'photorealistic') ||
+            (selectedMode === 'digital_art' && mode.id === 'illustration') ||
+            (selectedMode === 'cartoon' && mode.id === 'render_3d');
           const Icon = mode.icon;
 
           return (
             <button
               key={mode.id}
-              id={`mode-card-${mode.id}`}
               type="button"
+              id={`mode-option-${mode.id}`}
               disabled={disabled}
               onClick={() => onSelectMode(mode.id)}
-              className={`text-left p-3.5 rounded-xl border transition-all relative flex flex-col justify-between ${
+              className={`p-3 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
                 isSelected
-                  ? 'border-neutral-900 bg-neutral-900 text-white shadow-sm'
-                  : 'border-neutral-200 bg-white hover:border-neutral-300 hover:bg-neutral-50/70 text-neutral-800'
-              } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                  ? 'border-neutral-900 bg-neutral-900 text-white shadow-xs'
+                  : 'border-neutral-200 bg-white text-neutral-900 hover:border-neutral-300 hover:bg-neutral-50'
+              } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             >
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                      isSelected
-                        ? 'bg-neutral-800 text-white'
-                        : 'bg-neutral-100 text-neutral-700'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4" />
+                <div className="flex items-center justify-between gap-1 mb-1.5">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Icon
+                      className={`w-3.5 h-3.5 shrink-0 ${
+                        isSelected ? 'text-neutral-200' : 'text-neutral-700'
+                      }`}
+                    />
+                    <span className="font-semibold text-xs truncate">
+                      {mode.name}
+                    </span>
                   </div>
                   <span
-                    className={`text-[10px] font-medium tracking-wide uppercase px-2 py-0.5 rounded-full ${
+                    className={`text-[9px] font-mono px-1.5 py-0.2 rounded-sm shrink-0 ${
                       isSelected
-                        ? 'bg-neutral-800 text-neutral-300 border border-neutral-700'
-                        : 'bg-neutral-100 text-neutral-600 border border-neutral-200'
+                        ? 'bg-neutral-800 text-neutral-300'
+                        : 'bg-neutral-100 text-neutral-600'
                     }`}
                   >
                     {mode.badge}
                   </span>
                 </div>
 
-                <h4
-                  className={`text-sm font-bold tracking-tight mb-1 ${
-                    isSelected ? 'text-white' : 'text-neutral-900'
-                  }`}
-                >
-                  {mode.name}
-                </h4>
-
                 <p
-                  className={`text-xs leading-relaxed ${
+                  className={`text-[10px] leading-snug line-clamp-2 ${
                     isSelected ? 'text-neutral-300' : 'text-neutral-500'
                   }`}
                 >
                   {mode.description}
                 </p>
-              </div>
-
-              <div
-                className={`mt-3 pt-2.5 border-t text-[11px] font-mono truncate ${
-                  isSelected
-                    ? 'border-neutral-800 text-neutral-400'
-                    : 'border-neutral-100 text-neutral-400'
-                }`}
-              >
-                {mode.targetEngines}
               </div>
             </button>
           );
