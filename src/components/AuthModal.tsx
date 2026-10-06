@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { X, Mail, Lock, User as UserIcon, AlertCircle, CheckCircle, ArrowRight, Loader2 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { TurnstileWidget } from './TurnstileWidget';
@@ -26,8 +26,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const resetTurnstileRef = useRef<(() => void) | null>(null);
 
-  // Retrieve frontend-safe Turnstile Site Key from Vite environment variables
-  const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || '';
+  // Retrieve frontend-safe Turnstile Site Key from Vite environment variables (fallback to provided widget sitekey)
+  const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAAFPmbCnYtVFfMVu_').trim();
+
+  const handleTurnstileVerify = useCallback((token: string) => {
+    setTurnstileToken(token);
+    setErrorMsg(null);
+  }, []);
+
+  const handleTurnstileExpire = useCallback(() => {
+    setTurnstileToken(null);
+    setErrorMsg('Security check expired. Please complete the verification again.');
+  }, []);
+
+  const handleTurnstileError = useCallback(() => {
+    setTurnstileToken(null);
+    setErrorMsg('Security verification could not load. Please check your connection or ad blocker.');
+  }, []);
 
   if (!isOpen) return null;
 
@@ -281,18 +296,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="pt-1">
               <TurnstileWidget
                 siteKey={turnstileSiteKey}
-                onVerify={(token) => {
-                  setTurnstileToken(token);
-                  setErrorMsg(null);
-                }}
-                onExpire={() => {
-                  setTurnstileToken(null);
-                  setErrorMsg('Security check expired. Please complete the verification again.');
-                }}
-                onError={() => {
-                  setTurnstileToken(null);
-                  setErrorMsg('Security verification could not load. Please check your connection or ad blocker.');
-                }}
+                action="signup"
+                onVerify={handleTurnstileVerify}
+                onExpire={handleTurnstileExpire}
+                onError={handleTurnstileError}
                 resetRef={resetTurnstileRef}
               />
             </div>

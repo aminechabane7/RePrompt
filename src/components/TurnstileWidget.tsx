@@ -27,6 +27,7 @@ declare global {
 
 interface TurnstileWidgetProps {
   siteKey: string;
+  action?: string;
   onVerify: (token: string) => void;
   onExpire?: () => void;
   onError?: (error?: any) => void;
@@ -36,6 +37,7 @@ interface TurnstileWidgetProps {
 
 export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
   siteKey,
+  action = 'signup',
   onVerify,
   onExpire,
   onError,
@@ -45,6 +47,28 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
   const [loadError, setLoadError] = useState(false);
+
+  // Keep fresh callback references without re-running the effect
+  const onVerifyRef = useRef(onVerify);
+  onVerifyRef.current = onVerify;
+  const onExpireRef = useRef(onExpire);
+  onExpireRef.current = onExpire;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
+  useEffect(() => {
+    if (resetRef) {
+      resetRef.current = () => {
+        if (widgetIdRef.current && window.turnstile) {
+          try {
+            window.turnstile.reset(widgetIdRef.current);
+          } catch (e) {
+            console.warn('Turnstile reset warning:', e);
+          }
+        }
+      };
+    }
+  }, [resetRef]);
 
   useEffect(() => {
     if (!siteKey) return;
@@ -65,7 +89,7 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
       script.onerror = () => {
         if (isMounted) {
           setLoadError(true);
-          onError?.('Failed to load Cloudflare Turnstile security script.');
+          onErrorRef.current?.('Failed to load Cloudflare Turnstile security script.');
         }
       };
       document.head.appendChild(script);
@@ -80,19 +104,20 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
       try {
         const id = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
+          action: action || 'signup',
           callback: (token: string) => {
             if (isMounted) {
-              onVerify(token);
+              onVerifyRef.current?.(token);
             }
           },
           'expired-callback': () => {
             if (isMounted) {
-              onExpire?.();
+              onExpireRef.current?.();
             }
           },
           'error-callback': (err?: any) => {
             if (isMounted) {
-              onError?.(err);
+              onErrorRef.current?.(err);
             }
           },
           theme: 'light',
@@ -104,19 +129,6 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
         console.warn('Turnstile render warning:', err);
       }
     };
-
-    // Attach reset function to parent ref
-    if (resetRef) {
-      resetRef.current = () => {
-        if (widgetIdRef.current && window.turnstile) {
-          try {
-            window.turnstile.reset(widgetIdRef.current);
-          } catch (e) {
-            console.warn('Turnstile reset warning:', e);
-          }
-        }
-      };
-    }
 
     // Check if turnstile is already loaded, otherwise poll until available
     if (window.turnstile) {
@@ -133,7 +145,7 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
           clearInterval(timerId);
           if (isMounted) {
             setLoadError(true);
-            onError?.('Timeout loading security verification.');
+            onErrorRef.current?.('Timeout loading security verification.');
           }
         }
       }, 100);
@@ -150,11 +162,8 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
         }
         widgetIdRef.current = null;
       }
-      if (resetRef) {
-        resetRef.current = null;
-      }
     };
-  }, [siteKey, onVerify, onExpire, onError, resetRef]);
+  }, [siteKey, action]);
 
   if (!siteKey) {
     return (
