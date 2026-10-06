@@ -4,6 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { validateSignupEmail } from './src/lib/disposableEmailValidator';
 
 dotenv.config();
 
@@ -29,6 +30,16 @@ export const isSupabaseConfigured = Boolean(
 // Privileged server client using service role key (Never leak to browser!)
 const supabaseAdmin: SupabaseClient | null = isSupabaseConfigured
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    })
+  : null;
+
+// Public server client for Auth operations (signup with user CAPTCHA tokens)
+const supabaseAnonServer: SupabaseClient | null = (SUPABASE_URL && SUPABASE_ANON_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
@@ -143,6 +154,74 @@ function rateLimiter(req: Request, res: Response, next: NextFunction) {
     return res.status(429).json({
       success: false,
       error: 'Too many requests. Please wait before trying again.',
+    });
+  }
+
+  record.count += 1;
+  next();
+}
+
+// 4b. Auth & Email Validation Rate Limiters:
+// Separate sliding windows to avoid exhausting signup attempts when checking email syntax
+const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_SIGNUP_REQUESTS_PER_WINDOW = 15; // max 15 account creations per 15 mins per IP
+const signupRateLimitMap = new Map<string, { count: number; resetTime: number }>();
+
+const EMAIL_CHECK_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_EMAIL_CHECKS_PER_WINDOW = 40; // max 40 email validation checks per 10 mins per IP
+const emailCheckRateLimitMap = new Map<string, { count: number; resetTime: number }>();
+
+function signupRateLimiter(req: Request, res: Response, next: NextFunction) {
+  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'anonymous';
+  const now = Date.now();
+  const record = signupRateLimitMap.get(ip);
+
+  if (signupRateLimitMap.size > 5000) {
+    for (const [key, val] of signupRateLimitMap.entries()) {
+      if (now > val.resetTime) signupRateLimitMap.delete(key);
+    }
+  }
+
+  if (!record || now > record.resetTime) {
+    signupRateLimitMap.set(ip, { count: 1, resetTime: now + AUTH_RATE_LIMIT_WINDOW_MS });
+    return next();
+  }
+
+  if (record.count >= MAX_SIGNUP_REQUESTS_PER_WINDOW) {
+    const retrySec = Math.ceil((record.resetTime - now) / 1000);
+    res.set('Retry-After', String(retrySec));
+    return res.status(429).json({
+      success: false,
+      error: 'Too many signup attempts. Please wait a few minutes before trying again.',
+    });
+  }
+
+  record.count += 1;
+  next();
+}
+
+function emailCheckRateLimiter(req: Request, res: Response, next: NextFunction) {
+  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'anonymous';
+  const now = Date.now();
+  const record = emailCheckRateLimitMap.get(ip);
+
+  if (emailCheckRateLimitMap.size > 5000) {
+    for (const [key, val] of emailCheckRateLimitMap.entries()) {
+      if (now > val.resetTime) emailCheckRateLimitMap.delete(key);
+    }
+  }
+
+  if (!record || now > record.resetTime) {
+    emailCheckRateLimitMap.set(ip, { count: 1, resetTime: now + EMAIL_CHECK_WINDOW_MS });
+    return next();
+  }
+
+  if (record.count >= MAX_EMAIL_CHECKS_PER_WINDOW) {
+    const retrySec = Math.ceil((record.resetTime - now) / 1000);
+    res.set('Retry-After', String(retrySec));
+    return res.status(429).json({
+      valid: false,
+      error: 'Too many validation requests. Please wait a moment.',
     });
   }
 
@@ -614,6 +693,139 @@ function handleApiError(err: any, res: Response, fallbackMsg: string) {
 // =========================================================================
 // API ROUTES
 // =========================================================================
+
+// POST /api/auth/validate-email - Pre-check email syntax & disposable status (safe rate-limited check)
+app.post('/api/auth/validate-email', emailCheckRateLimiter, (req: Request, res: Response): void => {
+  const { email } = req.body || {};
+  const validation = validateSignupEmail(email);
+  if (!validation.isValid) {
+    res.status(400).json({
+      valid: false,
+      error: validation.error || 'Please enter a valid email address.',
+    });
+    return;
+  }
+
+  if (validation.isDisposable) {
+    res.status(400).json({
+      valid: false,
+      error: 'Temporary or disposable email addresses are not allowed. Please use a permanent email address.',
+    });
+    return;
+  }
+
+  res.json({
+    valid: true,
+  });
+});
+
+// POST /api/auth/signup - Authoritative Server-Side Registration & Disposable Email Guard
+app.post('/api/auth/signup', signupRateLimiter, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, password, displayName, captchaToken } = req.body || {};
+
+    if (!email || typeof email !== 'string') {
+      res.status(400).json({ success: false, error: 'Email address is required.' });
+      return;
+    }
+
+    if (!password || typeof password !== 'string' || password.length < 6) {
+      res.status(400).json({ success: false, error: 'Password must be at least 6 characters.' });
+      return;
+    }
+
+    // 1. Authoritative server-side email syntax & disposable domain check
+    const validation = validateSignupEmail(email);
+    if (!validation.isValid) {
+      res.status(400).json({
+        success: false,
+        error: validation.error || 'Please enter a valid email address.',
+      });
+      return;
+    }
+
+    if (validation.isDisposable) {
+      res.status(400).json({
+        success: false,
+        error: 'Temporary or disposable email addresses are not allowed. Please use a permanent email address.',
+      });
+      return;
+    }
+
+    // 2. Verify Supabase server configuration
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      res.status(503).json({
+        success: false,
+        error: 'Authentication service is not yet configured. Please contact the administrator.',
+      });
+      return;
+    }
+
+    // 3. Perform authoritative Supabase signup with verified permanent email
+    const clientForAuth = supabaseAnonServer || createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const signUpOptions: { data: { full_name: string }; captchaToken?: string } = {
+      data: {
+        full_name: typeof displayName === 'string' ? displayName.trim() : '',
+      },
+    };
+
+    if (captchaToken && typeof captchaToken === 'string') {
+      signUpOptions.captchaToken = captchaToken;
+    }
+
+    const { data, error } = await clientForAuth.auth.signUp({
+      email: validation.normalizedEmail || email.trim(),
+      password,
+      options: signUpOptions,
+    });
+
+    if (error) {
+      if (
+        error.message.toLowerCase().includes('already registered') ||
+        error.message.toLowerCase().includes('already exists')
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'An account with this email already exists. Please sign in instead.',
+        });
+        return;
+      }
+
+      if (
+        error.message.toLowerCase().includes('captcha') ||
+        error.message.toLowerCase().includes('security check') ||
+        error.message.toLowerCase().includes('turnstile')
+      ) {
+        res.status(400).json({
+          success: false,
+          error: 'Security verification failed. Please complete the security check again.',
+        });
+        return;
+      }
+
+      res.status(400).json({
+        success: false,
+        error: error.message || 'Unable to create account. Please try again.',
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      user: data.user,
+      session: data.session,
+    });
+  } catch (err: any) {
+    console.error('Signup error:', err);
+    res.status(500).json({
+      success: false,
+      error: 'An unexpected error occurred during account creation. Please try again.',
+    });
+  }
+});
 
 // GET /api/user/usage - Retrieves authenticated user's current server usage
 app.get('/api/user/usage', async (req: Request, res: Response): Promise<void> => {

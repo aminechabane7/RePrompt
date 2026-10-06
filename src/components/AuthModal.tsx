@@ -79,55 +79,59 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     try {
       if (mode === 'signup') {
-        const signUpOptions: {
-          data: { full_name: string };
-          captchaToken?: string;
-        } = {
-          data: {
-            full_name: displayName.trim(),
-          },
-        };
-
-        // Pass Turnstile CAPTCHA token to Supabase Auth
-        if (turnstileToken) {
-          signUpOptions.captchaToken = turnstileToken;
+        // Fast client-side pre-check for obvious disposable domains to avoid wasting CAPTCHA tokens
+        const emailDomain = email.trim().split('@')[1]?.toLowerCase();
+        if (
+          emailDomain &&
+          (emailDomain.includes('mailinator') ||
+            emailDomain.includes('10minutemail') ||
+            emailDomain.includes('tempmail') ||
+            emailDomain.includes('guerrillamail') ||
+            emailDomain.includes('throwaway') ||
+            emailDomain.includes('yopmail') ||
+            emailDomain.includes('sharklasers') ||
+            emailDomain.includes('dispostable'))
+        ) {
+          setTurnstileToken(null);
+          resetTurnstileRef.current?.();
+          setErrorMsg('Temporary or disposable email addresses are not allowed. Please use a permanent email address.');
+          return;
         }
 
-        const { data, error } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: signUpOptions,
+        // Authoritative server-side registration (verifies syntax, full 120,000+ disposable blocklist, & rate limit)
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: email.trim(),
+            password,
+            displayName: displayName.trim(),
+            captchaToken: turnstileToken,
+          }),
         });
 
-        if (error) {
+        const result = await res.json();
+
+        if (!res.ok || !result.success) {
           // Reset Turnstile token & widget immediately on error
           setTurnstileToken(null);
           resetTurnstileRef.current?.();
 
-          // User-friendly error sanitization
-          if (
-            error.message.toLowerCase().includes('captcha') ||
-            error.message.toLowerCase().includes('security check') ||
-            error.message.toLowerCase().includes('turnstile')
-          ) {
-            throw new Error('Security verification failed. Please complete the security check again.');
-          }
-          if (
-            error.message.toLowerCase().includes('already registered') ||
-            error.message.toLowerCase().includes('already exists')
-          ) {
-            throw new Error('An account with this email already exists. Please sign in instead.');
-          }
-          throw new Error(error.message || 'Unable to create account. Please try again.');
+          throw new Error(result.error || 'Unable to create account. Please try again.');
         }
 
         // Successfully consumed token: reset in-memory state
         setTurnstileToken(null);
 
-        if (data.session) {
+        if (result.session) {
+          if (supabase) {
+            await supabase.auth.setSession(result.session);
+          }
           setSuccessMsg('Account created successfully! Welcome to RePrompt.');
           setTimeout(() => onClose(), 1200);
-        } else if (data.user && !data.session) {
+        } else if (result.user && !result.session) {
           setSuccessMsg('Account registered! Please check your email inbox to verify your account.');
         }
       } else if (mode === 'signin') {
