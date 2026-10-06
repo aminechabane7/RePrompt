@@ -45,7 +45,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setSuccessMsg(null);
 
     if (!isSupabaseConfigured || !supabase) {
-      setErrorMsg('Supabase is not yet configured. Please add SUPABASE_URL and SUPABASE_ANON_KEY to your environment variables.');
+      setErrorMsg('Supabase is not yet configured. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment variables.');
       return;
     }
 
