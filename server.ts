@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import app, { isSupabaseConfigured } from './api/index.ts';
+import app, { isSupabaseConfigured } from './src/server/app.ts';
 
 const PORT = 3000;
 

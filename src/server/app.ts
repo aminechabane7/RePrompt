@@ -3,7 +3,7 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { validateSignupEmail } from '../src/lib/disposableEmailValidator';
+import { validateSignupEmail } from '../lib/disposableEmailValidator';
 
 dotenv.config();
 
