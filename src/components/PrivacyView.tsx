@@ -82,10 +82,10 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack, onNavigate }) 
           </div>
           <div>
             <h2 className="font-semibold text-neutral-900 text-sm mb-1">
-              Local Browser Storage (Zero Image Storage)
+              Account Data & Generation History
             </h2>
             <p className="text-xs sm:text-sm text-neutral-600 leading-relaxed">
-              Your "Prompt History" stores only lightweight text metadata in your private browser <code className="bg-neutral-100 px-1 py-0.5 rounded text-xs font-mono">localStorage</code> (such as the generated prompt string, selected mode, target engine, and timestamp). In accordance with our privacy hardening, <strong>original images and Base64 thumbnails are never saved in localStorage</strong>. You can wipe this local history at any time with the "Clear" button.
+              When you create an account, we store your profile details (email, display name), current generation usage counts, and text metadata for your past generations (prompt string, engine parameters, and creation timestamp) in your isolated Supabase account database so you can access your history across devices. <strong>Original uploaded images and pixel data are never saved in the database or stored on disk</strong>. You can permanently delete any generation record from your History at any time.
             </p>
           </div>
         </div>

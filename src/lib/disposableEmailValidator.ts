@@ -5,6 +5,8 @@
  * with robust subdomain matching, RFC syntax validation, and safe local fallback.
  */
 
+import domainList from 'disposable-email-domains';
+
 // Fallback list of prominent disposable/temporary email providers
 const FALLBACK_DISPOSABLE_DOMAINS = new Set<string>([
   'mailinator.com',
@@ -68,9 +70,6 @@ const KNOWN_PERMANENT_DOMAINS = new Set<string>([
 let disposableDomainsSet: Set<string>;
 
 try {
-  // Dynamically require or import the 120,000+ domain list
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const domainList = require('disposable-email-domains');
   if (Array.isArray(domainList)) {
     disposableDomainsSet = new Set<string>(domainList.map((d: string) => d.toLowerCase().trim()));
   } else {

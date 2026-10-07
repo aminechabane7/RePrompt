@@ -69,7 +69,7 @@ export const ContactView: React.FC<ContactViewProps> = ({ onBack, onNavigate }) 
               {SUPPORT_EMAIL}
             </a>
             <p className="text-xs text-neutral-500 mt-0.5">
-              Note for deployment: Configure custom domain mailbox before public production release.
+              Inquiries regarding prompt generation, account access, or technical support.
             </p>
           </div>
         </div>

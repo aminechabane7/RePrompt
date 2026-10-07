@@ -89,20 +89,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setUsage({
-            userId,
-            generationsUsed: data.generationsUsed ?? 0,
-            generationLimit: data.generationLimit ?? 3,
-            remaining: Math.max(0, (data.generationLimit ?? 3) - (data.generationsUsed ?? 0)),
-          });
-          setProfile({
-            id: userId,
-            plan: data.plan || 'free',
-            displayName: data.displayName || user?.user_metadata?.name || '',
-          });
-          return;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          if (data.success) {
+            setUsage({
+              userId,
+              generationsUsed: data.generationsUsed ?? 0,
+              generationLimit: data.generationLimit ?? 3,
+              remaining: Math.max(0, (data.generationLimit ?? 3) - (data.generationsUsed ?? 0)),
+            });
+            setProfile({
+              id: userId,
+              plan: data.plan || 'free',
+              displayName: data.displayName || user?.user_metadata?.name || '',
+            });
+            return;
+          }
         }
       }
     } catch (err) {

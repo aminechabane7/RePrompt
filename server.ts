@@ -12,7 +12,7 @@ const app = express();
 const PORT = 3000;
 
 // Production base URL helper
-const APP_BASE_URL = process.env.APP_URL || 'https://ais-dev-rm22uo2fga7gls7427qhmd-266588492875.europe-west2.run.app';
+const APP_BASE_URL = process.env.APP_URL || 'https://image-to-prompt-ai-mu.vercel.app';
 
 // -----------------------------------------------------------------------------
 // Supabase Server Setup
@@ -58,7 +58,10 @@ async function verifyAuthUser(req: Request): Promise<{ id: string; email?: strin
   if (!token) return null;
 
   if (!isSupabaseConfigured || !supabaseAdmin) {
-    // If Supabase is not configured yet in development, allow demo user id
+    if (process.env.NODE_ENV === 'production') {
+      return null;
+    }
+    // If Supabase is not configured yet in local development, allow demo user id
     return { id: 'demo-local-user', email: 'demo@reprompt.app' };
   }
 
@@ -81,6 +84,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   if (req.secure || forwardedProto === 'https') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
   }
@@ -234,7 +239,6 @@ function emailCheckRateLimiter(req: Request, res: Response, next: NextFunction) 
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
-    supabaseConfigured: isSupabaseConfigured,
   });
 });
 
@@ -1043,6 +1047,16 @@ app.post('/api/generate-prompt', rateLimiter, async (req: Request, res: Response
 // POST /api/improve-prompt
 app.post('/api/improve-prompt', rateLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
+    // 1. Authenticate user from Supabase access token (Never allow unauthenticated AI usage!)
+    const authUser = await verifyAuthUser(req);
+    if (!authUser) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required. Please sign in to improve prompts.',
+      });
+      return;
+    }
+
     const { prompt, mode = 'general', targetEngine = 'general', detailLevel = 'detailed' } = req.body;
 
     if (!prompt || typeof prompt !== 'string') {
@@ -1451,4 +1465,9 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only launch standalone HTTP server when not in a serverless environment (e.g. Vercel)
+if (process.env.VERCEL !== '1') {
+  startServer();
+}
+
+export default app;
