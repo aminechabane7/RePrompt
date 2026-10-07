@@ -14,6 +14,7 @@ interface AuthContextType {
   recoveryError: string | null;
   clearPasswordRecovery: () => void;
   refreshUsage: () => Promise<void>;
+  getAccessToken: () => Promise<string | null>;
   signOut: () => Promise<void>;
 }
 
@@ -67,6 +68,7 @@ const AuthContext = createContext<AuthContextType>({
   recoveryError: null,
   clearPasswordRecovery: () => {},
   refreshUsage: async () => {},
+  getAccessToken: async () => null,
   signOut: async () => {},
 });
 
@@ -190,6 +192,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const getAccessToken = async (): Promise<string | null> => {
+    if (!isSupabaseConfigured || !supabase) return session?.access_token ?? null;
+    try {
+      const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+      if (error || !currentSession) return session?.access_token ?? null;
+      if (currentSession.access_token !== session?.access_token) {
+        setSession(currentSession);
+        setUser(currentSession.user);
+      }
+      return currentSession.access_token;
+    } catch {
+      return session?.access_token ?? null;
+    }
+  };
+
   const signOut = async () => {
     if (supabase) {
       await supabase.auth.signOut();
@@ -215,6 +232,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         recoveryError,
         clearPasswordRecovery,
         refreshUsage,
+        getAccessToken,
         signOut,
       }}
     >

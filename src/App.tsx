@@ -87,7 +87,9 @@ export default function App() {
     user,
     session,
     usage,
+    loading,
     refreshUsage,
+    getAccessToken,
     isConfigured,
     isPasswordRecovery,
     recoveryError,
@@ -210,10 +212,18 @@ export default function App() {
       return;
     }
 
-    // Require authentication if Supabase is configured
-    if (isConfigured && !user) {
-      handleOpenAuth('signup');
-      setErrorMsg('Please create a free account or sign in to generate prompts.');
+    if (loading) {
+      setErrorMsg('Checking authentication status, please wait a moment...');
+      return;
+    }
+
+    // Retrieve fresh Supabase access token (and auto-refresh expired JWT)
+    const token = await getAccessToken();
+
+    // Require authentication if Supabase is configured and no valid user or token is present
+    if (isConfigured && (!user && !token)) {
+      handleOpenAuth('signin');
+      setErrorMsg('Please sign in or create an account to generate prompts.');
       return;
     }
 
@@ -274,8 +284,9 @@ export default function App() {
         'Content-Type': 'application/json',
       };
 
-      if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`;
+      const activeToken = token || session?.access_token;
+      if (activeToken) {
+        headers['Authorization'] = `Bearer ${activeToken}`;
       }
 
       const response = await fetch('/api/generate-prompt', {
@@ -338,8 +349,10 @@ export default function App() {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
-      if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`;
+      const token = await getAccessToken();
+      const activeToken = token || session?.access_token;
+      if (activeToken) {
+        headers['Authorization'] = `Bearer ${activeToken}`;
       }
 
       const response = await fetch('/api/improve-prompt', {

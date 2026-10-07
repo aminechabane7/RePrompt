@@ -3,6 +3,7 @@ import { VideoUpload } from './VideoUpload';
 import { VideoPromptModeSelector } from './VideoPromptModeSelector';
 import { VideoPromptResult } from './VideoPromptResult';
 import { VideoPromptMode, VideoVisualAnalysis, GenerateVideoPromptResponse } from '../types';
+import { useAuth } from '../lib/AuthContext';
 import {
   MAX_SAFE_REQUEST_BYTES,
   measureJsonPayloadBytes,
@@ -23,6 +24,7 @@ interface VideoGeneratorViewProps {
 export const VideoGeneratorView: React.FC<VideoGeneratorViewProps> = ({
   onSwitchToImage,
 }) => {
+  const { user, getAccessToken } = useAuth();
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [videoName, setVideoName] = useState<string>('');
   const [duration, setDuration] = useState<number>(0);
@@ -107,9 +109,15 @@ export const VideoGeneratorView: React.FC<VideoGeneratorViewProps> = ({
         throw new Error(`The video keyframes payload (${(serializedBytes / (1024 * 1024)).toFixed(2)} MB) exceeds the safe 3.5 MB request budget. Please select a shorter or lower-resolution video.`);
       }
 
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token = await getAccessToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await fetch('/api/generate-video-prompt', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payloadBody),
       });
 
