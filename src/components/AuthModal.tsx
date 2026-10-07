@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Mail, Lock, User as UserIcon, AlertCircle, CheckCircle, ArrowRight, Loader2 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { TurnstileWidget } from './TurnstileWidget';
@@ -21,6 +21,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Sync mode whenever modal opens or initialMode changes
+  useEffect(() => {
+    if (isOpen) {
+      setMode(initialMode);
+      setErrorMsg(null);
+      setSuccessMsg(null);
+      setTurnstileToken(null);
+      resetTurnstileRef.current?.();
+    }
+  }, [isOpen, initialMode]);
 
   // Cloudflare Turnstile token lifecycle state (strictly in-memory, never persisted)
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
