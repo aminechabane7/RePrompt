@@ -212,22 +212,23 @@ export default function App() {
       return;
     }
 
+    // 1. If auth is still loading, wait for initialization
     if (loading) {
       setErrorMsg('Checking authentication status, please wait a moment...');
       return;
     }
 
-    // Retrieve fresh Supabase access token (and auto-refresh expired JWT)
+    // 2. Authoritative asynchronous token retrieval at action time
     const token = await getAccessToken();
 
-    // Require authentication if Supabase is configured and no valid user or token is present
-    if (isConfigured && (!user && !token)) {
+    // 3. If Supabase is configured and no valid token is found, open Sign In
+    if (isConfigured && !token) {
       handleOpenAuth('signin');
       setErrorMsg('Please sign in or create an account to generate prompts.');
       return;
     }
 
-    // Pre-check usage state
+    // 4. Pre-check client usage state
     if (usage && usage.remaining <= 0) {
       setErrorMsg('Free generation limit reached (3/3 used). Please check your account.');
       return;
@@ -250,7 +251,7 @@ export default function App() {
     }, 4500);
 
     try {
-      // 1. Prepare and measure final serialized JSON payload before fetch()
+      // 5. Client image optimization & payload measurement
       let imagePayload = selectedImage;
       let payloadBody = {
         image: imagePayload,
@@ -261,7 +262,6 @@ export default function App() {
 
       let serializedBytes = measureJsonPayloadBytes(payloadBody);
 
-      // 2. If serialized payload exceeds safe budget, run an on-the-fly optimization pass
       if (serializedBytes > MAX_SAFE_REQUEST_BYTES) {
         setLoadingStep('Optimizing payload to fit safe transmission budget...');
         const reOpt = await optimizeImageForUpload(imagePayload, 'image.jpg', 2.5 * 1024 * 1024);
@@ -275,7 +275,6 @@ export default function App() {
         serializedBytes = measureJsonPayloadBytes(payloadBody);
       }
 
-      // 3. Strict guard: never send if payload exceeds safe 3.5 MB Vercel platform budget
       if (serializedBytes > MAX_SAFE_REQUEST_BYTES) {
         throw new Error(`The image payload (${(serializedBytes / (1024 * 1024)).toFixed(2)} MB) exceeds the safe 3.5 MB request budget. Please select a smaller image.`);
       }
@@ -284,9 +283,10 @@ export default function App() {
         'Content-Type': 'application/json',
       };
 
-      const activeToken = token || session?.access_token;
-      if (activeToken) {
-        headers['Authorization'] = `Bearer ${activeToken}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      } else if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
       }
 
       const response = await fetch('/api/generate-prompt', {
