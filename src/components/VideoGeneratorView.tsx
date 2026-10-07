@@ -4,6 +4,11 @@ import { VideoPromptModeSelector } from './VideoPromptModeSelector';
 import { VideoPromptResult } from './VideoPromptResult';
 import { VideoPromptMode, VideoVisualAnalysis, GenerateVideoPromptResponse } from '../types';
 import {
+  MAX_SAFE_REQUEST_BYTES,
+  measureJsonPayloadBytes,
+  optimizeVideoKeyframes,
+} from '../lib/clientImageOptimizer';
+import {
   Video,
   Sparkles,
   ArrowRight,
@@ -79,13 +84,33 @@ export const VideoGeneratorView: React.FC<VideoGeneratorViewProps> = ({
     }, 5500);
 
     try {
+      // Measure total combined serialized JSON payload
+      let candidateFrames = frames;
+      let payloadBody = {
+        frames: candidateFrames,
+        mode: videoMode,
+      };
+
+      let serializedBytes = measureJsonPayloadBytes(payloadBody);
+
+      if (serializedBytes > MAX_SAFE_REQUEST_BYTES) {
+        setLoadingStep('Optimizing video keyframes for safe transmission...');
+        candidateFrames = await optimizeVideoKeyframes(frames, 2.5 * 1024 * 1024);
+        payloadBody = {
+          frames: candidateFrames,
+          mode: videoMode,
+        };
+        serializedBytes = measureJsonPayloadBytes(payloadBody);
+      }
+
+      if (serializedBytes > MAX_SAFE_REQUEST_BYTES) {
+        throw new Error(`The video keyframes payload (${(serializedBytes / (1024 * 1024)).toFixed(2)} MB) exceeds the safe 3.5 MB request budget. Please select a shorter or lower-resolution video.`);
+      }
+
       const response = await fetch('/api/generate-video-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          frames,
-          mode: videoMode,
-        }),
+        body: JSON.stringify(payloadBody),
       });
 
       const contentType = response.headers.get('content-type') || '';

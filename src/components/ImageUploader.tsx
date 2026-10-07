@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { UploadCloud, Image as ImageIcon, X, Sparkles, RefreshCw, AlertCircle } from 'lucide-react';
 import { SAMPLE_IMAGES, SampleImage } from '../data/samples';
+import { optimizeImageForUpload } from '../lib/clientImageOptimizer';
 
 interface ImageUploaderProps {
   selectedImage: string | null;
@@ -19,9 +20,10 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isOptimizing, setIsOptimizing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const processFile = (file: File) => {
+  const processFile = async (file: File) => {
     setErrorMsg(null);
     const validMimes = ['image/jpeg', 'image/png', 'image/webp'];
 
@@ -35,32 +37,25 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
       return;
     }
 
-    const reader = new FileReader();
-    reader.onerror = () => {
-      setErrorMsg('Failed to read file from your device. Please try again.');
-    };
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      const img = new Image();
-      img.onerror = () => {
-        setErrorMsg('The image file is corrupted or unreadable. Please choose another file.');
-      };
-      img.onload = () => {
-        onImageSelected(dataUrl, {
-          name: file.name,
-          size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
-          width: img.width,
-          height: img.height,
-        });
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
+    setIsOptimizing(true);
+    try {
+      const opt = await optimizeImageForUpload(file, file.name);
+      onImageSelected(opt.dataUrl, {
+        name: file.name,
+        size: `${(opt.optimizedBytes / (1024 * 1024)).toFixed(2)} MB`,
+        width: opt.width,
+        height: opt.height,
+      });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'The image file could not be processed. Please choose another file.');
+    } finally {
+      setIsOptimizing(false);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    if (!isLoading) setIsDragging(true);
+    if (!isLoading && !isOptimizing) setIsDragging(true);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
@@ -71,7 +66,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (isLoading) return;
+    if (isLoading || isOptimizing) return;
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       processFile(e.dataTransfer.files[0]);
@@ -85,29 +80,21 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
   };
 
   const handleSelectSample = async (sample: SampleImage) => {
-    if (isLoading) return;
+    if (isLoading || isOptimizing) return;
     setErrorMsg(null);
+    setIsOptimizing(true);
     try {
-      const response = await fetch(sample.url);
-      if (!response.ok) throw new Error('Sample fetch failed');
-      const blob = await response.blob();
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const dataUrl = reader.result as string;
-        const img = new Image();
-        img.onload = () => {
-          onImageSelected(dataUrl, {
-            name: `${sample.name}.webp`,
-            size: `${(blob.size / (1024 * 1024)).toFixed(2)} MB`,
-            width: img.width,
-            height: img.height,
-          });
-        };
-        img.src = dataUrl;
-      };
-      reader.readAsDataURL(blob);
+      const opt = await optimizeImageForUpload(sample.url, `${sample.name}.webp`);
+      onImageSelected(opt.dataUrl, {
+        name: `${sample.name}.webp`,
+        size: `${(opt.optimizedBytes / (1024 * 1024)).toFixed(2)} MB`,
+        width: opt.width,
+        height: opt.height,
+      });
     } catch {
       setErrorMsg('Failed to load sample image. Please try uploading an image directly.');
+    } finally {
+      setIsOptimizing(false);
     }
   };
 

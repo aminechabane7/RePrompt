@@ -21,6 +21,11 @@ import { VideoGeneratorView } from './components/VideoGeneratorView';
 import { ResetPasswordView } from './components/ResetPasswordView';
 import { useAuth } from './lib/AuthContext';
 import {
+  MAX_SAFE_REQUEST_BYTES,
+  measureJsonPayloadBytes,
+  optimizeImageForUpload,
+} from './lib/clientImageOptimizer';
+import {
   PromptMode,
   TargetEngine,
   DetailLevel,
@@ -235,6 +240,36 @@ export default function App() {
     }, 4500);
 
     try {
+      // 1. Prepare and measure final serialized JSON payload before fetch()
+      let imagePayload = selectedImage;
+      let payloadBody = {
+        image: imagePayload,
+        mode: promptMode,
+        targetEngine,
+        detailLevel,
+      };
+
+      let serializedBytes = measureJsonPayloadBytes(payloadBody);
+
+      // 2. If serialized payload exceeds safe budget, run an on-the-fly optimization pass
+      if (serializedBytes > MAX_SAFE_REQUEST_BYTES) {
+        setLoadingStep('Optimizing payload to fit safe transmission budget...');
+        const reOpt = await optimizeImageForUpload(imagePayload, 'image.jpg', 2.5 * 1024 * 1024);
+        imagePayload = reOpt.dataUrl;
+        payloadBody = {
+          image: imagePayload,
+          mode: promptMode,
+          targetEngine,
+          detailLevel,
+        };
+        serializedBytes = measureJsonPayloadBytes(payloadBody);
+      }
+
+      // 3. Strict guard: never send if payload exceeds safe 3.5 MB Vercel platform budget
+      if (serializedBytes > MAX_SAFE_REQUEST_BYTES) {
+        throw new Error(`The image payload (${(serializedBytes / (1024 * 1024)).toFixed(2)} MB) exceeds the safe 3.5 MB request budget. Please select a smaller image.`);
+      }
+
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
@@ -246,12 +281,7 @@ export default function App() {
       const response = await fetch('/api/generate-prompt', {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          image: selectedImage,
-          mode: promptMode,
-          targetEngine,
-          detailLevel,
-        }),
+        body: JSON.stringify(payloadBody),
       });
 
       const contentType = response.headers.get('content-type') || '';
