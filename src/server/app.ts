@@ -16,18 +16,18 @@ const APP_BASE_URL = process.env.APP_URL || 'https://image-to-prompt-ai-mu.verce
 // -----------------------------------------------------------------------------
 // Supabase Server Setup
 // -----------------------------------------------------------------------------
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const SUPABASE_ANON_KEY = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
 export const isSupabaseConfigured = Boolean(
   SUPABASE_URL &&
-  SUPABASE_SERVICE_ROLE_KEY &&
+  (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY) &&
   !SUPABASE_URL.includes('your-project')
 );
 
 // Privileged server client using service role key (Never leak to browser!)
-const supabaseAdmin: SupabaseClient | null = isSupabaseConfigured
+const supabaseAdmin: SupabaseClient | null = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY && !SUPABASE_URL.includes('your-project'))
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: {
         autoRefreshToken: false,
@@ -36,8 +36,8 @@ const supabaseAdmin: SupabaseClient | null = isSupabaseConfigured
     })
   : null;
 
-// Public server client for Auth operations (signup with user CAPTCHA tokens)
-const supabaseAnonServer: SupabaseClient | null = (SUPABASE_URL && SUPABASE_ANON_KEY)
+// Public server client for Auth operations and token verification
+const supabaseAnonServer: SupabaseClient | null = (SUPABASE_URL && SUPABASE_ANON_KEY && !SUPABASE_URL.includes('your-project'))
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         autoRefreshToken: false,
@@ -46,17 +46,28 @@ const supabaseAnonServer: SupabaseClient | null = (SUPABASE_URL && SUPABASE_ANON
     })
   : null;
 
-// Auth verification helper: verifies Supabase JWT access token
+// Auth verification helper: verifies Supabase JWT access token with Supabase Auth service
 async function verifyAuthUser(req: Request): Promise<{ id: string; email?: string } | null> {
   const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
+  const headerPresent = Boolean(authHeader);
+  const bearerParsed = Boolean(authHeader && authHeader.startsWith('Bearer '));
+  const token = bearerParsed && authHeader ? authHeader.split(' ')[1] : '';
+  const tokenLengthOk = Boolean(token && token.length > 0);
+  const urlConfigured = Boolean(SUPABASE_URL && !SUPABASE_URL.includes('your-project'));
+  const serverKeyConfigured = Boolean(SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
 
-  const token = authHeader.split(' ')[1];
-  if (!token) return null;
+  const authClient = supabaseAdmin || supabaseAnonServer;
 
-  if (!isSupabaseConfigured || !supabaseAdmin) {
+  if (!urlConfigured || !authClient) {
+    console.log('[SERVER AUTH] header present:', headerPresent);
+    console.log('[SERVER AUTH] bearer parsed:', bearerParsed);
+    console.log('[SERVER AUTH] token length > 0:', tokenLengthOk);
+    console.log('[SERVER AUTH] Supabase URL configured:', urlConfigured);
+    console.log('[SERVER AUTH] Supabase server key configured:', serverKeyConfigured);
+    console.log('[SERVER AUTH] getUser success: false');
+    console.log('[SERVER AUTH] auth error present: true');
+    console.log('[SERVER AUTH] authenticated user present: false');
+
     if (process.env.NODE_ENV === 'production') {
       return null;
     }
@@ -64,13 +75,34 @@ async function verifyAuthUser(req: Request): Promise<{ id: string; email?: strin
     return { id: 'demo-local-user', email: 'demo@reprompt.app' };
   }
 
+  if (!tokenLengthOk) {
+    console.log('[SERVER AUTH] header present:', headerPresent);
+    console.log('[SERVER AUTH] bearer parsed:', bearerParsed);
+    console.log('[SERVER AUTH] token length > 0: false');
+    return null;
+  }
+
   try {
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    const { data: { user }, error } = await authClient.auth.getUser(token);
+    const getUserSuccess = Boolean(!error && user);
+    const authErrorPresent = Boolean(error);
+    const authUserPresent = Boolean(user);
+
+    console.log('[SERVER AUTH] header present:', headerPresent);
+    console.log('[SERVER AUTH] bearer parsed:', bearerParsed);
+    console.log('[SERVER AUTH] token length > 0:', tokenLengthOk);
+    console.log('[SERVER AUTH] Supabase URL configured:', urlConfigured);
+    console.log('[SERVER AUTH] Supabase server key configured:', serverKeyConfigured);
+    console.log('[SERVER AUTH] getUser success:', getUserSuccess);
+    console.log('[SERVER AUTH] auth error present:', authErrorPresent);
+    console.log('[SERVER AUTH] authenticated user present:', authUserPresent);
+
     if (error || !user) {
       return null;
     }
     return { id: user.id, email: user.email };
   } catch {
+    console.log('[SERVER AUTH] getUser exception occurred');
     return null;
   }
 }

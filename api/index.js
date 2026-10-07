@@ -121737,19 +121737,19 @@ function validateSignupEmail(rawEmail) {
 dotenv.config();
 var app = express();
 var APP_BASE_URL = process.env.APP_URL || "https://image-to-prompt-ai-mu.vercel.app";
-var SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-var SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-var SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+var SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
+var SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+var SUPABASE_ANON_KEY = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "").trim();
 var isSupabaseConfigured = Boolean(
-  SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY && !SUPABASE_URL.includes("your-project")
+  SUPABASE_URL && (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY) && !SUPABASE_URL.includes("your-project")
 );
-var supabaseAdmin = isSupabaseConfigured ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+var supabaseAdmin = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY && !SUPABASE_URL.includes("your-project") ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: {
     autoRefreshToken: false,
     persistSession: false
   }
 }) : null;
-var supabaseAnonServer = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+var supabaseAnonServer = SUPABASE_URL && SUPABASE_ANON_KEY && !SUPABASE_URL.includes("your-project") ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     autoRefreshToken: false,
     persistSession: false
@@ -121757,24 +121757,52 @@ var supabaseAnonServer = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABA
 }) : null;
 async function verifyAuthUser(req) {
   const authHeader = req.headers["authorization"];
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-  const token = authHeader.split(" ")[1];
-  if (!token) return null;
-  if (!isSupabaseConfigured || !supabaseAdmin) {
+  const headerPresent = Boolean(authHeader);
+  const bearerParsed = Boolean(authHeader && authHeader.startsWith("Bearer "));
+  const token = bearerParsed && authHeader ? authHeader.split(" ")[1] : "";
+  const tokenLengthOk = Boolean(token && token.length > 0);
+  const urlConfigured = Boolean(SUPABASE_URL && !SUPABASE_URL.includes("your-project"));
+  const serverKeyConfigured = Boolean(SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+  const authClient = supabaseAdmin || supabaseAnonServer;
+  if (!urlConfigured || !authClient) {
+    console.log("[SERVER AUTH] header present:", headerPresent);
+    console.log("[SERVER AUTH] bearer parsed:", bearerParsed);
+    console.log("[SERVER AUTH] token length > 0:", tokenLengthOk);
+    console.log("[SERVER AUTH] Supabase URL configured:", urlConfigured);
+    console.log("[SERVER AUTH] Supabase server key configured:", serverKeyConfigured);
+    console.log("[SERVER AUTH] getUser success: false");
+    console.log("[SERVER AUTH] auth error present: true");
+    console.log("[SERVER AUTH] authenticated user present: false");
     if (process.env.NODE_ENV === "production") {
       return null;
     }
     return { id: "demo-local-user", email: "demo@reprompt.app" };
   }
+  if (!tokenLengthOk) {
+    console.log("[SERVER AUTH] header present:", headerPresent);
+    console.log("[SERVER AUTH] bearer parsed:", bearerParsed);
+    console.log("[SERVER AUTH] token length > 0: false");
+    return null;
+  }
   try {
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    const { data: { user }, error } = await authClient.auth.getUser(token);
+    const getUserSuccess = Boolean(!error && user);
+    const authErrorPresent = Boolean(error);
+    const authUserPresent = Boolean(user);
+    console.log("[SERVER AUTH] header present:", headerPresent);
+    console.log("[SERVER AUTH] bearer parsed:", bearerParsed);
+    console.log("[SERVER AUTH] token length > 0:", tokenLengthOk);
+    console.log("[SERVER AUTH] Supabase URL configured:", urlConfigured);
+    console.log("[SERVER AUTH] Supabase server key configured:", serverKeyConfigured);
+    console.log("[SERVER AUTH] getUser success:", getUserSuccess);
+    console.log("[SERVER AUTH] auth error present:", authErrorPresent);
+    console.log("[SERVER AUTH] authenticated user present:", authUserPresent);
     if (error || !user) {
       return null;
     }
     return { id: user.id, email: user.email };
   } catch {
+    console.log("[SERVER AUTH] getUser exception occurred");
     return null;
   }
 }
