@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, History, User, LogIn, Zap, LogOut } from 'lucide-react';
+import { Sparkles, History, User, LogIn, Zap, LogOut, KeyRound } from 'lucide-react';
 import { PageRoute } from '../types';
 import { useAuth } from '../lib/AuthContext';
 
@@ -16,7 +16,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenHistory,
   onOpenAuthModal,
 }) => {
-  const { user, profile, usage, isConfigured } = useAuth();
+  const { user, profile, usage, isConfigured, isPasswordRecovery } = useAuth();
 
   const remaining = usage ? Math.max(0, usage.generationLimit - usage.generationsUsed) : 3;
   const isFreePlan = (profile?.plan || 'free') === 'free';
@@ -130,8 +130,8 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Tools (Auth + History + Usage) */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Real Server Usage Badge (when logged in) */}
-          {user && (
+          {/* Real Server Usage Badge (when logged in and not in recovery) */}
+          {user && !isPasswordRecovery && (
             <div
               id="server-usage-badge"
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 bg-neutral-50 text-neutral-800 text-xs font-mono"
@@ -143,20 +143,27 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-          {/* History Button */}
-          <button
-            id="header-history-button"
-            type="button"
-            onClick={onOpenHistory}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-xs font-medium transition-colors shadow-2xs"
-            aria-label="Open prompt history"
-          >
-            <History className="w-3.5 h-3.5 text-neutral-600" />
-            <span className="hidden xs:inline">History</span>
-          </button>
+          {/* History Button (disabled during password recovery) */}
+          {!isPasswordRecovery && (
+            <button
+              id="header-history-button"
+              type="button"
+              onClick={onOpenHistory}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 text-xs font-medium transition-colors shadow-2xs"
+              aria-label="Open prompt history"
+            >
+              <History className="w-3.5 h-3.5 text-neutral-600" />
+              <span className="hidden xs:inline">History</span>
+            </button>
+          )}
 
           {/* Authentication Controls */}
-          {user ? (
+          {isPasswordRecovery ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 bg-neutral-100 text-neutral-800 text-xs font-medium">
+              <KeyRound className="w-3.5 h-3.5 text-neutral-700" />
+              <span>Resetting Password</span>
+            </div>
+          ) : user ? (
             /* Logged In User Pill */
             <button
               id="header-account-button"

@@ -18,6 +18,7 @@ import { PrivacyView } from './components/PrivacyView';
 import { TermsView } from './components/TermsView';
 import { ContactView } from './components/ContactView';
 import { VideoGeneratorView } from './components/VideoGeneratorView';
+import { ResetPasswordView } from './components/ResetPasswordView';
 import { useAuth } from './lib/AuthContext';
 import {
   PromptMode,
@@ -77,7 +78,16 @@ const PAGE_METADATA: Record<PageRoute | 'account', { path: string; title: string
 };
 
 export default function App() {
-  const { user, session, usage, refreshUsage, isConfigured } = useAuth();
+  const {
+    user,
+    session,
+    usage,
+    refreshUsage,
+    isConfigured,
+    isPasswordRecovery,
+    recoveryError,
+    clearPasswordRecovery,
+  } = useAuth();
 
   const [activePage, setActivePage] = useState<PageRoute | 'account'>('generator');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -103,7 +113,7 @@ export default function App() {
   // Modals state
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup'>('signin');
+  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
 
   // Synchronize URL, canonical, title, and meta tags
   const navigateTo = (page: PageRoute | 'account', replace = false) => {
@@ -170,7 +180,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const handleOpenAuth = (mode: 'signin' | 'signup') => {
+  const handleOpenAuth = (mode: 'signin' | 'signup' | 'forgot') => {
     setAuthModalMode(mode);
     setIsAuthModalOpen(true);
   };
@@ -349,7 +359,22 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1">
-        {activePage === 'account' && (
+        {isPasswordRecovery || recoveryError ? (
+          <div className="py-12 sm:py-20 px-4 sm:px-6 flex items-center justify-center">
+            <ResetPasswordView
+              onComplete={() => {
+                clearPasswordRecovery();
+                navigateTo('generator');
+              }}
+              onRequestNewLink={() => {
+                clearPasswordRecovery();
+                handleOpenAuth('forgot');
+              }}
+            />
+          </div>
+        ) : (
+          <>
+            {activePage === 'account' && (
           <AccountView
             onBack={() => {
               navigateTo('generator');
@@ -629,6 +654,8 @@ export default function App() {
               </div>
             )}
           </div>
+        )}
+          </>
         )}
       </main>
 

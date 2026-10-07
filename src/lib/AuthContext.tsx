@@ -10,9 +10,51 @@ interface AuthContextType {
   usage: UserUsage | null;
   loading: boolean;
   isConfigured: boolean;
+  isPasswordRecovery: boolean;
+  recoveryError: string | null;
+  clearPasswordRecovery: () => void;
   refreshUsage: () => Promise<void>;
   signOut: () => Promise<void>;
 }
+
+const checkIsRecoveryFromUrl = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const hash = window.location.hash || '';
+  const search = window.location.search || '';
+  if (hash.includes('type=recovery') || search.includes('type=recovery')) return true;
+  try {
+    const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+    if (hashParams.get('type') === 'recovery') return true;
+    const searchParams = new URLSearchParams(search);
+    if (searchParams.get('type') === 'recovery') return true;
+  } catch {
+    // Ignore URL parse errors
+  }
+  return false;
+};
+
+const checkRecoveryErrorFromUrl = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash || '';
+  const search = window.location.search || '';
+  try {
+    const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+    const searchParams = new URLSearchParams(search);
+    const desc = hashParams.get('error_description') || searchParams.get('error_description');
+    const code = hashParams.get('error_code') || searchParams.get('error_code');
+    const err = hashParams.get('error') || searchParams.get('error');
+
+    if (desc) {
+      return decodeURIComponent(desc.replace(/\+/g, ' '));
+    }
+    if (code === '401' || err === 'unauthorized_client' || err === 'access_denied') {
+      return 'The password reset link is invalid or has expired. Please request a new one.';
+    }
+  } catch {
+    // Ignore URL parse errors
+  }
+  return null;
+};
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
@@ -21,6 +63,9 @@ const AuthContext = createContext<AuthContextType>({
   usage: null,
   loading: true,
   isConfigured: false,
+  isPasswordRecovery: false,
+  recoveryError: null,
+  clearPasswordRecovery: () => {},
   refreshUsage: async () => {},
   signOut: async () => {},
 });
@@ -31,6 +76,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [usage, setUsage] = useState<UserUsage | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(() => checkIsRecoveryFromUrl());
+  const [recoveryError, setRecoveryError] = useState<string | null>(() => checkRecoveryErrorFromUrl());
 
   const fetchProfileAndUsage = async (userId: string, accessToken: string) => {
     try {
@@ -98,6 +145,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
 
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true);
+        setRecoveryError(null);
+      } else if (event === 'SIGNED_OUT') {
+        setIsPasswordRecovery(false);
+        setRecoveryError(null);
+      }
+
       if (currentSession?.user && currentSession.access_token) {
         await fetchProfileAndUsage(currentSession.user.id, currentSession.access_token);
       } else {
@@ -112,6 +167,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, []);
 
+  const clearPasswordRecovery = () => {
+    setIsPasswordRecovery(false);
+    setRecoveryError(null);
+    if (typeof window !== 'undefined') {
+      try {
+        const hash = window.location.hash || '';
+        if (
+          hash.includes('recovery') ||
+          hash.includes('access_token') ||
+          hash.includes('error') ||
+          hash.includes('type=')
+        ) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+      } catch {
+        // Ignore history replace errors
+      }
+    }
+  };
+
   const signOut = async () => {
     if (supabase) {
       await supabase.auth.signOut();
@@ -120,6 +195,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setSession(null);
     setProfile(null);
     setUsage(null);
+    setIsPasswordRecovery(false);
+    setRecoveryError(null);
   };
 
   return (
@@ -131,6 +208,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         usage,
         loading,
         isConfigured: isSupabaseConfigured,
+        isPasswordRecovery,
+        recoveryError,
+        clearPasswordRecovery,
         refreshUsage,
         signOut,
       }}
