@@ -309,6 +309,9 @@ export default function App() {
           handleOpenAuth('signin');
           throw new Error('Please sign in to generate prompts.');
         }
+        if (data?.code === 'EMAIL_NOT_VERIFIED') {
+          throw new Error(data?.error || 'Please verify your email address to unlock AI generations.');
+        }
         if (response.status === 403 || data?.code === 'LIMIT_REACHED') {
           await refreshUsage();
           throw new Error('Free generation limit reached (3 of 3 free generations used).');
@@ -377,6 +380,7 @@ export default function App() {
 
       if (data?.success && data?.improvedPrompt) {
         setGeneratedPrompt(data.improvedPrompt);
+        await refreshUsage();
       } else {
         throw new Error(data?.error || 'Failed to improve prompt.');
       }

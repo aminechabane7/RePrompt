@@ -46,8 +46,14 @@ const supabaseAnonServer: SupabaseClient | null = (SUPABASE_URL && SUPABASE_ANON
     })
   : null;
 
+export interface AuthenticatedUser {
+  id: string;
+  email?: string;
+  isEmailConfirmed: boolean;
+}
+
 // Auth verification helper: verifies Supabase JWT access token with Supabase Auth service
-async function verifyAuthUser(req: Request): Promise<{ id: string; email?: string } | null> {
+async function verifyAuthUser(req: Request): Promise<AuthenticatedUser | null> {
   const authHeader = req.headers['authorization'];
   const headerPresent = Boolean(authHeader);
   const bearerParsed = Boolean(authHeader && authHeader.startsWith('Bearer '));
@@ -72,7 +78,7 @@ async function verifyAuthUser(req: Request): Promise<{ id: string; email?: strin
       return null;
     }
     // If Supabase is not configured yet in local development, allow demo user id
-    return { id: 'demo-local-user', email: 'demo@reprompt.app' };
+    return { id: 'demo-local-user', email: 'demo@reprompt.app', isEmailConfirmed: true };
   }
 
   if (!tokenLengthOk) {
@@ -100,7 +106,15 @@ async function verifyAuthUser(req: Request): Promise<{ id: string; email?: strin
     if (error || !user) {
       return null;
     }
-    return { id: user.id, email: user.email };
+
+    const isEmailConfirmed = Boolean(user.email_confirmed_at || (user as any).confirmed_at);
+    console.log('[SERVER AUTH] email confirmed:', isEmailConfirmed);
+
+    return {
+      id: user.id,
+      email: user.email,
+      isEmailConfirmed,
+    };
   } catch {
     console.log('[SERVER AUTH] getUser exception occurred');
     return null;
@@ -1001,7 +1015,18 @@ app.post('/api/generate-prompt', rateLimiter, async (req: Request, res: Response
       });
       return;
     }
-    console.log(`[GENERATE-PROMPT] User authenticated successfully: id=${authUser.id}`);
+
+    if (!authUser.isEmailConfirmed) {
+      console.warn(`[GENERATE-PROMPT] Generation rejected: unconfirmed email for user ${authUser.id}`);
+      res.status(403).json({
+        success: false,
+        error: 'Please verify your email address to unlock AI generations. Check your inbox for the confirmation link.',
+        code: 'EMAIL_NOT_VERIFIED',
+      });
+      return;
+    }
+
+    console.log(`[GENERATE-PROMPT] User authenticated successfully: id=${authUser.id}, emailConfirmed=true`);
 
     // 2. Validate and inspect file signatures server-side BEFORE checking credits or calling AI
     const validation = validateAndDecodeImage(image);
@@ -1190,7 +1215,7 @@ app.post('/api/generate-prompt', rateLimiter, async (req: Request, res: Response
   }
 });
 
-// POST /api/improve-prompt
+// POST /api/improve-prompt (Server-Side Credit Enforcement & Auth Guard)
 app.post('/api/improve-prompt', rateLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     // 1. Authenticate user from Supabase access token (Never allow unauthenticated AI usage!)
@@ -1199,6 +1224,16 @@ app.post('/api/improve-prompt', rateLimiter, async (req: Request, res: Response)
       res.status(401).json({
         success: false,
         error: 'Authentication required. Please sign in to improve prompts.',
+      });
+      return;
+    }
+
+    if (!authUser.isEmailConfirmed) {
+      console.warn(`[IMPROVE-PROMPT] Improvement rejected: unconfirmed email for user ${authUser.id}`);
+      res.status(403).json({
+        success: false,
+        error: 'Please verify your email address to unlock AI prompt enhancements. Check your inbox for the confirmation link.',
+        code: 'EMAIL_NOT_VERIFIED',
       });
       return;
     }
@@ -1215,8 +1250,68 @@ app.post('/api/improve-prompt', rateLimiter, async (req: Request, res: Response)
       return;
     }
 
+    // 2. Server-Side Credit Check & Atomic Reservation via RPC (Unconditional Fail-Closed)
+    if (!supabaseAdmin) {
+      console.error('[IMPROVE-PROMPT] Generation rejected: privileged Supabase client (supabaseAdmin) is unavailable');
+      res.status(503).json({
+        success: false,
+        error: 'Credit management service is temporarily unavailable. Please try again shortly.',
+        code: 'SERVICE_ROLE_UNAVAILABLE',
+      });
+      return;
+    }
+
+    console.log(`[IMPROVE-PROMPT] Calling reserve_generation_credit RPC for user: ${authUser.id}`);
+    const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('reserve_generation_credit', {
+      target_user_id: authUser.id,
+    });
+
+    if (rpcError) {
+      console.error('[IMPROVE-PROMPT] Supabase credit reservation RPC failure:', rpcError);
+      res.status(500).json({
+        success: false,
+        error: 'Unable to verify generation credits at this time. Please try again shortly.',
+        details: rpcError.message || 'Credit reservation database error.',
+        code: 'CREDIT_RPC_ERROR',
+      });
+      return;
+    }
+
+    if (!rpcData || !rpcData.allowed) {
+      console.warn(`[IMPROVE-PROMPT] Generation limit reached for user ${authUser.id}`);
+      res.status(403).json({
+        success: false,
+        error: 'Free generation limit reached. You have used all 3 free generations.',
+        code: 'LIMIT_REACHED',
+      });
+      return;
+    }
+
+    if (!rpcData.reservation_id) {
+      console.error('[IMPROVE-PROMPT] Reservation RPC succeeded but returned no reservation_id');
+      res.status(500).json({
+        success: false,
+        error: 'Unable to reserve generation credit. Please try again shortly.',
+        code: 'INVALID_RESERVATION',
+      });
+      return;
+    }
+
+    const reservation = rpcData;
+    console.log(`[IMPROVE-PROMPT] Reservation approved: id=${reservation.reservation_id}, remaining=${reservation.remaining}`);
+
     const apiKey = getGeminiApiKey();
     if (!apiKey) {
+      if (reservation.reservation_id) {
+        try {
+          await supabaseAdmin.rpc('release_generation_credit', {
+            p_reservation_id: reservation.reservation_id,
+            p_reason: 'CONFIG_ERROR',
+          });
+        } catch (releaseErr) {
+          console.error('[IMPROVE-PROMPT] Failed to release reservation on missing API key:', releaseErr);
+        }
+      }
       res.status(500).json({ success: false, error: 'AI service configuration error: GEMINI_API_KEY is not set.' });
       return;
     }
@@ -1245,36 +1340,133 @@ ${prompt}`;
 
     const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
     let improvedPrompt = prompt;
+    let chosenModel = 'gemini-3.1-flash-lite';
 
-    for (const model of candidateModels) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000);
+    try {
+      let generationSuccess = false;
+      for (const model of candidateModels) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-        const response = await Promise.race([
-          ai.models.generateContent({
-            model,
-            contents: instruction,
-          }),
-          new Promise<never>((_, reject) => {
-            controller.signal.addEventListener('abort', () => reject(new Error('AI_TIMEOUT')));
-          }),
-        ]);
-        clearTimeout(timeoutId);
+          const response = await Promise.race([
+            ai.models.generateContent({
+              model,
+              contents: instruction,
+            }),
+            new Promise<never>((_, reject) => {
+              controller.signal.addEventListener('abort', () => reject(new Error('AI_TIMEOUT')));
+            }),
+          ]);
+          clearTimeout(timeoutId);
 
-        if (response?.text) {
-          improvedPrompt = response.text.trim();
-          break;
+          if (response?.text) {
+            improvedPrompt = response.text.trim();
+            chosenModel = model;
+            generationSuccess = true;
+            break;
+          }
+        } catch (err: any) {
+          if (err.message === 'AI_TIMEOUT') throw new Error('AI_TIMEOUT');
         }
-      } catch (err: any) {
-        if (err.message === 'AI_TIMEOUT') throw new Error('AI_TIMEOUT');
       }
+      if (!generationSuccess) {
+        throw new Error('AI service failed to produce an improved prompt.');
+      }
+    } catch (aiErr: any) {
+      console.error('[IMPROVE-PROMPT] AI improvement failed:', aiErr?.message || aiErr);
+      if (supabaseAdmin && reservation.reservation_id) {
+        try {
+          const { error: releaseErr } = await supabaseAdmin.rpc('release_generation_credit', {
+            p_reservation_id: reservation.reservation_id,
+            p_reason: aiErr.message === 'AI_TIMEOUT' ? 'AI_TIMEOUT' : 'AI_FAILURE',
+          });
+          if (releaseErr) {
+            console.error('[IMPROVE-PROMPT] Error releasing credit reservation:', releaseErr);
+          } else {
+            console.log(`[IMPROVE-PROMPT] Released reservation ${reservation.reservation_id} due to AI failure`);
+          }
+        } catch (releaseErr) {
+          console.error('[IMPROVE-PROMPT] Failed to release reservation on AI failure:', releaseErr);
+        }
+      }
+      throw aiErr;
     }
+
     improvedPrompt = improvedPrompt.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+
+    // 3. Finalize reservation upon successful AI generation
+    let finalUsage = reservation;
+    try {
+      const { data: finalData, error: finalErr } = await supabaseAdmin.rpc('finalize_generation_credit', {
+        p_reservation_id: reservation.reservation_id,
+      });
+
+      if (finalErr || !finalData?.success) {
+        const failureReason = finalErr?.message || finalData?.reason || 'Unknown finalization error';
+        console.error('[IMPROVE-PROMPT] Credit finalization failed:', failureReason);
+        res.status(500).json({
+          success: false,
+          error: 'Unable to finalize credit accounting. Please try again.',
+          details: failureReason,
+          code: 'FINALIZATION_FAILED',
+        });
+        return;
+      }
+
+      finalUsage = { ...finalUsage, remaining: finalData.remaining, generations_used: finalData.generations_used };
+      console.log(`[IMPROVE-PROMPT] Reservation finalized. New remaining: ${finalUsage.remaining}`);
+    } catch (finalizeErr: any) {
+      console.error('[IMPROVE-PROMPT] Exception during credit finalization:', finalizeErr);
+      res.status(500).json({
+        success: false,
+        error: 'Unable to finalize credit accounting due to a server error. Please try again.',
+        details: finalizeErr?.message || 'Finalization exception',
+        code: 'FINALIZATION_FAILED',
+      });
+      return;
+    }
+
+    // 4. Record generation in Supabase
+    let historySaved = false;
+    let historyWarning: string | undefined = undefined;
+
+    try {
+      const { data: insertData, error: insertErr } = await supabaseAdmin.from('generations').insert({
+        user_id: authUser.id,
+        reservation_id: reservation.reservation_id,
+        prompt: improvedPrompt,
+        negative_prompt: null,
+        mode: `improve_${mode}`,
+        target_engine: targetEngine,
+        detail_level: detailLevel,
+        detected_style: 'Prompt Optimization',
+        aspect_ratio: 'custom',
+        model_used: chosenModel,
+      }).select('id').single();
+
+      if (insertErr) {
+        console.error('[IMPROVE-PROMPT] Failed to insert generation record into Supabase:', insertErr);
+        historySaved = false;
+        historyWarning = 'Prompt improved, but saving to your History failed. Credit was accounted.';
+      } else {
+        historySaved = true;
+        console.log(`[IMPROVE-PROMPT] Generation record persisted to history: ${insertData?.id}`);
+      }
+    } catch (dbErr: any) {
+      console.error('[IMPROVE-PROMPT] Exception recording generation metadata to database:', dbErr);
+      historySaved = false;
+      historyWarning = 'Prompt improved, but saving to your History failed due to a database error.';
+    }
 
     res.json({
       success: true,
       improvedPrompt,
+      creditsRemaining: finalUsage.remaining,
+      generationsUsed: finalUsage.generations_used,
+      modelUsed: chosenModel,
+      historySaved,
+      ...(historyWarning ? { historyWarning } : {}),
     });
   } catch (err: any) {
     handleApiError(err, res, 'Unable to improve prompt at this time. Please try again.');
@@ -1403,6 +1595,16 @@ app.post('/api/generate-video-prompt', rateLimiter, async (req: Request, res: Re
       res.status(401).json({
         success: false,
         error: 'Authentication required. Please sign in or create an account to generate video prompts.',
+      });
+      return;
+    }
+
+    if (!authUser.isEmailConfirmed) {
+      console.warn(`[GENERATE-VIDEO] Generation rejected: unconfirmed email for user ${authUser.id}`);
+      res.status(403).json({
+        success: false,
+        error: 'Please verify your email address to unlock AI generations. Check your inbox for the confirmation link.',
+        code: 'EMAIL_NOT_VERIFIED',
       });
       return;
     }
