@@ -121737,9 +121737,9 @@ function validateSignupEmail(rawEmail) {
 dotenv.config();
 var app = express();
 var APP_BASE_URL = process.env.APP_URL || "https://image-to-prompt-ai-mu.vercel.app";
-var SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
-var SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
-var SUPABASE_ANON_KEY = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "").trim();
+var SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").replace(/^["']|["']$/g, "").trim();
+var SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY || "").replace(/^["']|["']$/g, "").trim();
+var SUPABASE_ANON_KEY = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "").replace(/^["']|["']$/g, "").trim();
 var isSupabaseConfigured = Boolean(
   SUPABASE_URL && (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY) && !SUPABASE_URL.includes("your-project")
 );
@@ -121926,6 +121926,10 @@ function emailCheckRateLimiter(req, res, next) {
   }
   record.count += 1;
   next();
+}
+function getGeminiApiKey() {
+  const rawKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENAI_API_KEY || "";
+  return rawKey.replace(/^["']|["']$/g, "").trim();
 }
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -122224,23 +122228,24 @@ function parseVisionResponse(rawText, mode = "general", targetEngine = "general"
   };
 }
 async function callGeminiVision(base64Data, mimeType, promptText) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured");
+    throw new Error("GEMINI_API_KEY is not configured. Please ensure GEMINI_API_KEY is added to your environment variables.");
   }
   const ai = new GoogleGenAI({
     apiKey,
     httpOptions: {
       headers: {
-        "User-Agent": "reprompt-app"
+        "User-Agent": "aistudio-build"
       }
     }
   });
-  const candidateModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"];
+  const candidateModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite", "gemini-2.5-flash"];
   let lastError = null;
   for (const model of candidateModels) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
+        console.log(`[Gemini Vision] Requesting model ${model} (attempt ${attempt + 1})...`);
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 25e3);
         const response = await Promise.race([
@@ -122266,10 +122271,14 @@ async function callGeminiVision(base64Data, mimeType, promptText) {
         ]);
         clearTimeout(timeoutId);
         if (response && response.text) {
+          console.log(`[Gemini Vision] Model ${model} succeeded! Result length: ${response.text.length}`);
           return { text: response.text, modelName: model };
+        } else {
+          throw new Error(`Model ${model} returned an empty response`);
         }
       } catch (err) {
         lastError = err;
+        console.warn(`[Gemini Vision] Model ${model} attempt ${attempt + 1} failed:`, err?.message || err);
         if (err.message === "AI_TIMEOUT") {
           throw new Error("AI_TIMEOUT");
         }
@@ -122286,34 +122295,66 @@ async function callGeminiVision(base64Data, mimeType, promptText) {
   throw lastError || new Error("Failed to analyze image with vision model");
 }
 function handleApiError(err, res, fallbackMsg) {
-  console.error("[API Error]:", err?.message || "Unknown error");
+  const errCode = err?.status || err?.statusCode || (err?.message === "AI_TIMEOUT" ? 504 : 500);
+  let rawMsg = "Unknown error";
+  if (typeof err === "string") {
+    rawMsg = err;
+  } else if (err?.message) {
+    rawMsg = err.message;
+    if (rawMsg.startsWith("{") && rawMsg.endsWith("}")) {
+      try {
+        const parsedJson = JSON.parse(rawMsg);
+        if (parsedJson?.error?.message) {
+          rawMsg = parsedJson.error.message;
+        }
+      } catch {
+      }
+    }
+  } else if (err?.error?.message) {
+    rawMsg = err.error.message;
+  } else if (err?.statusText) {
+    rawMsg = err.statusText;
+  }
+  const sanitizedMsg = String(rawMsg).replace(/(?:key|token|secret|password)=[^\s&"']+/gi, "$1=[REDACTED]").replace(/AIza[0-9A-Za-z-_]{35}/g, "[REDACTED_GEMINI_KEY]").replace(/sbp_[0-9A-Za-z-_]{30,}/g, "[REDACTED_SUPABASE_KEY]");
+  console.error("[API Error]:", sanitizedMsg, `(status: ${errCode})`);
   if (err?.message === "AI_TIMEOUT") {
     return res.status(504).json({
       success: false,
-      error: "Your request took too long. The AI service timed out. Please try again."
+      error: "Your request took too long. The AI service timed out. Please try again.",
+      details: "AI generation timed out after 25s.",
+      code: "AI_TIMEOUT"
     });
   }
-  if (err?.status === 429 || err?.message?.includes("429") || err?.message?.includes("quota") || err?.message?.includes("rate")) {
+  if (err?.status === 429 || /429|quota|rate\s*limit/i.test(sanitizedMsg)) {
     return res.status(429).json({
       success: false,
-      error: "The AI service is experiencing high traffic. Please wait a moment before trying again."
+      error: "The AI service is experiencing high traffic or quota limits. Please wait a moment before trying again.",
+      details: sanitizedMsg,
+      code: "RATE_LIMIT"
     });
   }
-  if (err?.status === 503 || err?.message?.includes("503") || err?.message?.includes("unavailable") || err?.message?.includes("high demand")) {
+  if (err?.status === 503 || /503|unavailable|high demand/i.test(sanitizedMsg)) {
     return res.status(503).json({
       success: false,
-      error: "The AI service is temporarily unavailable. Please try again shortly."
+      error: "The AI service is temporarily unavailable. Please try again shortly.",
+      details: sanitizedMsg,
+      code: "SERVICE_UNAVAILABLE"
     });
   }
-  if (err?.message?.includes("API key") || err?.message?.includes("credentials")) {
+  if (/api[_-]?key|credentials|gemini_api_key/i.test(sanitizedMsg)) {
     return res.status(500).json({
       success: false,
-      error: "AI service configuration error. Please ensure credentials are properly set."
+      error: "AI service configuration error. Please ensure GEMINI_API_KEY is configured in your deployment settings.",
+      details: sanitizedMsg,
+      code: "API_KEY_ERROR"
     });
   }
-  return res.status(500).json({
+  const finalStatus = errCode >= 400 && errCode < 600 ? errCode : 500;
+  return res.status(finalStatus).json({
     success: false,
-    error: fallbackMsg
+    error: fallbackMsg,
+    details: sanitizedMsg,
+    code: err?.code || "ANALYSIS_ERROR"
   });
 }
 var handleValidateEmail = (req, res) => {
@@ -122433,14 +122474,11 @@ app.get("/api/user/usage", async (req, res) => {
       res.status(401).json({ success: false, error: "Authentication required." });
       return;
     }
-    if (!isSupabaseConfigured || !supabaseAdmin) {
-      res.json({
-        success: true,
-        plan: "free",
-        generationsUsed: 0,
-        generationLimit: 3,
-        remaining: 3,
-        displayName: "Demo User"
+    if (!supabaseAdmin) {
+      res.status(503).json({
+        success: false,
+        error: "Usage tracking service is temporarily unavailable.",
+        code: "SERVICE_ROLE_UNAVAILABLE"
       });
       return;
     }
@@ -122481,104 +122519,159 @@ app.post("/api/generate-prompt", rateLimiter, async (req, res) => {
       targetEngine = "general",
       detailLevel = "detailed"
     } = req.body;
+    console.log(`[GENERATE-PROMPT] Initiating request: mode=${mode}, engine=${targetEngine}, detail=${detailLevel}`);
     const authUser = await verifyAuthUser(req);
     if (!authUser) {
+      console.warn("[GENERATE-PROMPT] Auth failed: no valid user session detected.");
       res.status(401).json({
         success: false,
         error: "Authentication required. Please sign in or create an account to generate prompts."
       });
       return;
     }
+    console.log(`[GENERATE-PROMPT] User authenticated successfully: id=${authUser.id}`);
     const validation = validateAndDecodeImage(image);
     if (validation.error || !validation.data) {
+      console.warn(`[GENERATE-PROMPT] Image validation failed: ${validation.error}`);
       res.status(validation.status || 400).json({
         success: false,
         error: validation.error
       });
       return;
     }
-    let reservation = {
-      allowed: true,
-      remaining: 3
-    };
-    if (isSupabaseConfigured && supabaseAdmin) {
-      const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc("reserve_generation_credit", {
-        target_user_id: authUser.id
+    console.log(`[GENERATE-PROMPT] Image validated: mime=${validation.data.mimeType}, size=${validation.data.byteLength} bytes`);
+    if (!supabaseAdmin) {
+      console.error("[GENERATE-PROMPT] Generation rejected: privileged Supabase client (supabaseAdmin) is unavailable");
+      res.status(503).json({
+        success: false,
+        error: "Credit management service is temporarily unavailable. Please try again shortly.",
+        code: "SERVICE_ROLE_UNAVAILABLE"
       });
-      if (rpcError) {
-        console.error("Supabase credit reservation RPC failure:", rpcError);
-        res.status(500).json({
-          success: false,
-          error: "Unable to verify generation credits at this time. Please try again shortly."
-        });
-        return;
-      }
-      if (!rpcData || !rpcData.allowed) {
-        res.status(403).json({
-          success: false,
-          error: "Free generation limit reached. You have used all 3 free generations.",
-          code: "LIMIT_REACHED"
-        });
-        return;
-      }
-      reservation = rpcData;
+      return;
     }
+    console.log(`[GENERATE-PROMPT] Calling reserve_generation_credit RPC for user: ${authUser.id}`);
+    const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc("reserve_generation_credit", {
+      target_user_id: authUser.id
+    });
+    if (rpcError) {
+      console.error("[GENERATE-PROMPT] Supabase credit reservation RPC failure:", rpcError);
+      res.status(500).json({
+        success: false,
+        error: "Unable to verify generation credits at this time. Please try again shortly.",
+        details: rpcError.message || "Credit reservation database error.",
+        code: "CREDIT_RPC_ERROR"
+      });
+      return;
+    }
+    if (!rpcData || !rpcData.allowed) {
+      console.warn(`[GENERATE-PROMPT] Generation limit reached for user ${authUser.id}`);
+      res.status(403).json({
+        success: false,
+        error: "Free generation limit reached. You have used all 3 free generations.",
+        code: "LIMIT_REACHED"
+      });
+      return;
+    }
+    if (!rpcData.reservation_id) {
+      console.error("[GENERATE-PROMPT] Reservation RPC succeeded but returned no reservation_id");
+      res.status(500).json({
+        success: false,
+        error: "Unable to reserve generation credit. Please try again shortly.",
+        code: "INVALID_RESERVATION"
+      });
+      return;
+    }
+    const reservation = rpcData;
+    console.log(`[GENERATE-PROMPT] Reservation approved: id=${reservation.reservation_id}, remaining=${reservation.remaining}`);
     const { mimeType, base64Data } = validation.data;
     const promptText = buildVisionPrompt(mode, targetEngine, detailLevel);
     let rawResult = "";
     let modelName = "";
     try {
+      console.log("[GENERATE-PROMPT] Calling AI Vision service...");
       const visionResult = await callGeminiVision(base64Data, mimeType, promptText);
       rawResult = visionResult.text;
       modelName = visionResult.modelName;
+      console.log(`[GENERATE-PROMPT] AI Vision analysis completed successfully using model: ${modelName}`);
     } catch (aiError) {
-      if (isSupabaseConfigured && supabaseAdmin && reservation.reservation_id) {
+      console.error("[GENERATE-PROMPT] AI Vision analysis failed:", aiError?.message || aiError);
+      if (supabaseAdmin && reservation.reservation_id) {
         try {
-          await supabaseAdmin.rpc("release_generation_credit", {
+          const { error: releaseErr } = await supabaseAdmin.rpc("release_generation_credit", {
             p_reservation_id: reservation.reservation_id,
             p_reason: aiError.message === "AI_TIMEOUT" ? "AI_TIMEOUT" : "AI_FAILURE"
           });
+          if (releaseErr) {
+            console.error("[GENERATE-PROMPT] Error releasing credit reservation:", releaseErr);
+          } else {
+            console.log(`[GENERATE-PROMPT] Released reservation ${reservation.reservation_id} due to AI failure`);
+          }
         } catch (releaseErr) {
-          console.error("Failed to release reservation on AI failure:", releaseErr);
+          console.error("[GENERATE-PROMPT] Failed to release reservation on AI failure:", releaseErr);
         }
       }
       throw aiError;
     }
     let finalUsage = reservation;
-    if (isSupabaseConfigured && supabaseAdmin && reservation.reservation_id) {
-      try {
-        const { data: finalData, error: finalErr } = await supabaseAdmin.rpc("finalize_generation_credit", {
-          p_reservation_id: reservation.reservation_id
+    try {
+      const { data: finalData, error: finalErr } = await supabaseAdmin.rpc("finalize_generation_credit", {
+        p_reservation_id: reservation.reservation_id
+      });
+      if (finalErr || !finalData?.success) {
+        const failureReason = finalErr?.message || finalData?.reason || "Unknown finalization error";
+        console.error("[GENERATE-PROMPT] Credit finalization failed:", failureReason);
+        res.status(500).json({
+          success: false,
+          error: "Unable to finalize credit accounting. Please try again.",
+          details: failureReason,
+          code: "FINALIZATION_FAILED"
         });
-        if (!finalErr && finalData?.success) {
-          finalUsage = { ...finalUsage, remaining: finalData.remaining, generations_used: finalData.generations_used };
-        }
-      } catch (finalizeErr) {
-        console.error("Failed to finalize credit reservation:", finalizeErr);
+        return;
       }
+      finalUsage = { ...finalUsage, remaining: finalData.remaining, generations_used: finalData.generations_used };
+      console.log(`[GENERATE-PROMPT] Reservation finalized. New remaining: ${finalUsage.remaining}`);
+    } catch (finalizeErr) {
+      console.error("[GENERATE-PROMPT] Exception during credit finalization:", finalizeErr);
+      res.status(500).json({
+        success: false,
+        error: "Unable to finalize credit accounting due to a server error. Please try again.",
+        details: finalizeErr?.message || "Finalization exception",
+        code: "FINALIZATION_FAILED"
+      });
+      return;
     }
     const { prompt, negativePrompt, detectedStyle, aspectRatio, analysis } = parseVisionResponse(
       rawResult,
       mode,
       targetEngine
     );
-    if (isSupabaseConfigured && supabaseAdmin) {
-      try {
-        await supabaseAdmin.from("generations").insert({
-          user_id: authUser.id,
-          reservation_id: reservation.reservation_id || null,
-          prompt,
-          negative_prompt: negativePrompt || null,
-          mode,
-          target_engine: targetEngine,
-          detail_level: detailLevel,
-          detected_style: detectedStyle,
-          aspect_ratio: aspectRatio,
-          model_used: modelName
-        });
-      } catch (dbErr) {
-        console.warn("Failed to record generation metadata to database:", dbErr);
+    let historySaved = false;
+    let historyWarning = void 0;
+    try {
+      const { data: insertData, error: insertErr } = await supabaseAdmin.from("generations").insert({
+        user_id: authUser.id,
+        reservation_id: reservation.reservation_id,
+        prompt,
+        negative_prompt: negativePrompt || null,
+        mode,
+        target_engine: targetEngine,
+        detail_level: detailLevel,
+        detected_style: detectedStyle,
+        aspect_ratio: aspectRatio,
+        model_used: modelName
+      }).select("id").single();
+      if (insertErr) {
+        console.error("[GENERATE-PROMPT] Failed to insert generation record into Supabase:", insertErr);
+        historySaved = false;
+        historyWarning = "Generation completed, but saving to your History failed. Your prompt has been generated and credit accounted.";
+      } else {
+        historySaved = true;
+        console.log(`[GENERATE-PROMPT] Generation record persisted to history: ${insertData?.id}`);
       }
+    } catch (dbErr) {
+      console.error("[GENERATE-PROMPT] Exception recording generation metadata to database:", dbErr);
+      historySaved = false;
+      historyWarning = "Generation completed, but saving to your History failed due to a database error.";
     }
     res.json({
       success: true,
@@ -122591,7 +122684,9 @@ app.post("/api/generate-prompt", rateLimiter, async (req, res) => {
       analysis,
       modelUsed: modelName,
       creditsRemaining: finalUsage.remaining,
-      generationsUsed: finalUsage.generations_used
+      generationsUsed: finalUsage.generations_used,
+      historySaved,
+      ...historyWarning ? { historyWarning } : {}
     });
   } catch (error) {
     handleApiError(error, res, "We couldn't analyze this image. Please try another image or try again.");
@@ -122616,14 +122711,14 @@ app.post("/api/improve-prompt", rateLimiter, async (req, res) => {
       res.status(400).json({ success: false, error: "Prompt exceeds maximum length of 2,500 characters." });
       return;
     }
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = getGeminiApiKey();
     if (!apiKey) {
-      res.status(500).json({ success: false, error: "AI service configuration missing." });
+      res.status(500).json({ success: false, error: "AI service configuration error: GEMINI_API_KEY is not set." });
       return;
     }
     const ai = new GoogleGenAI({
       apiKey,
-      httpOptions: { headers: { "User-Agent": "reprompt-app" } }
+      httpOptions: { headers: { "User-Agent": "aistudio-build" } }
     });
     const instruction = `You are a master AI image prompt engineer.
 Enhance and polish the following prompt for image reproduction.
@@ -122798,23 +122893,6 @@ app.post("/api/generate-video-prompt", rateLimiter, async (req, res) => {
       });
       return;
     }
-    let reservation = {
-      allowed: true,
-      remaining: 3
-    };
-    if (isSupabaseConfigured && supabaseAdmin) {
-      const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc("reserve_generation_credit", {
-        target_user_id: authUser.id
-      });
-      if (rpcError || !rpcData?.allowed) {
-        res.status(403).json({
-          success: false,
-          error: "Free generation limit reached. You have used all 3 free generations."
-        });
-        return;
-      }
-      reservation = rpcData;
-    }
     const sanitizedFrames = frames.slice(0, 4);
     const validatedParts = [];
     for (const frame of sanitizedFrames) {
@@ -122829,32 +122907,73 @@ app.post("/api/generate-video-prompt", rateLimiter, async (req, res) => {
       }
     }
     if (validatedParts.length === 0) {
-      if (isSupabaseConfigured && supabaseAdmin && reservation.reservation_id) {
-        await supabaseAdmin.rpc("release_generation_credit", {
-          p_reservation_id: reservation.reservation_id,
-          p_reason: "INVALID_PAYLOAD"
-        });
-      }
       res.status(400).json({
         success: false,
         error: "No valid keyframes could be decoded from the video payload."
       });
       return;
     }
-    const apiKey = process.env.GEMINI_API_KEY;
+    if (!supabaseAdmin) {
+      console.error("[GENERATE-VIDEO] Generation rejected: privileged Supabase client (supabaseAdmin) is unavailable");
+      res.status(503).json({
+        success: false,
+        error: "Credit management service is temporarily unavailable. Please try again shortly.",
+        code: "SERVICE_ROLE_UNAVAILABLE"
+      });
+      return;
+    }
+    console.log(`[GENERATE-VIDEO] Calling reserve_generation_credit RPC for user: ${authUser.id}`);
+    const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc("reserve_generation_credit", {
+      target_user_id: authUser.id
+    });
+    if (rpcError) {
+      console.error("[GENERATE-VIDEO] Supabase credit reservation RPC failure:", rpcError);
+      res.status(500).json({
+        success: false,
+        error: "Unable to verify generation credits at this time. Please try again shortly.",
+        details: rpcError.message || "Credit reservation database error.",
+        code: "CREDIT_RPC_ERROR"
+      });
+      return;
+    }
+    if (!rpcData || !rpcData.allowed) {
+      console.warn(`[GENERATE-VIDEO] Generation limit reached for user ${authUser.id}`);
+      res.status(403).json({
+        success: false,
+        error: "Free generation limit reached. You have used all 3 free generations.",
+        code: "LIMIT_REACHED"
+      });
+      return;
+    }
+    if (!rpcData.reservation_id) {
+      console.error("[GENERATE-VIDEO] Reservation RPC succeeded but returned no reservation_id");
+      res.status(500).json({
+        success: false,
+        error: "Unable to reserve generation credit. Please try again shortly.",
+        code: "INVALID_RESERVATION"
+      });
+      return;
+    }
+    const reservation = rpcData;
+    console.log(`[GENERATE-VIDEO] Reservation approved: id=${reservation.reservation_id}, remaining=${reservation.remaining}`);
+    const apiKey = getGeminiApiKey();
     if (!apiKey) {
-      if (isSupabaseConfigured && supabaseAdmin && reservation.reservation_id) {
-        await supabaseAdmin.rpc("release_generation_credit", {
-          p_reservation_id: reservation.reservation_id,
-          p_reason: "CONFIG_ERROR"
-        });
+      if (reservation.reservation_id) {
+        try {
+          await supabaseAdmin.rpc("release_generation_credit", {
+            p_reservation_id: reservation.reservation_id,
+            p_reason: "CONFIG_ERROR"
+          });
+        } catch (releaseErr) {
+          console.error("[GENERATE-VIDEO] Failed to release reservation on missing API key:", releaseErr);
+        }
       }
-      res.status(500).json({ success: false, error: "AI service configuration missing." });
+      res.status(500).json({ success: false, error: "AI service configuration error: GEMINI_API_KEY is not set." });
       return;
     }
     const ai = new GoogleGenAI({
       apiKey,
-      httpOptions: { headers: { "User-Agent": "reprompt-app" } }
+      httpOptions: { headers: { "User-Agent": "aistudio-build" } }
     });
     const promptText = buildVideoVisionPrompt(mode);
     const candidateModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"];
@@ -122890,14 +123009,19 @@ app.post("/api/generate-video-prompt", rateLimiter, async (req, res) => {
         }
       }
     } catch (aiErr) {
-      if (isSupabaseConfigured && supabaseAdmin && reservation.reservation_id) {
+      if (supabaseAdmin && reservation.reservation_id) {
         try {
-          await supabaseAdmin.rpc("release_generation_credit", {
+          const { error: releaseErr } = await supabaseAdmin.rpc("release_generation_credit", {
             p_reservation_id: reservation.reservation_id,
             p_reason: "AI_FAILURE"
           });
+          if (releaseErr) {
+            console.error("[GENERATE-VIDEO] Error releasing video reservation:", releaseErr);
+          } else {
+            console.log(`[GENERATE-VIDEO] Released reservation ${reservation.reservation_id} due to AI failure`);
+          }
         } catch (releaseErr) {
-          console.error("Failed to release video reservation:", releaseErr);
+          console.error("[GENERATE-VIDEO] Failed to release video reservation:", releaseErr);
         }
       }
       throw aiErr;
@@ -122905,42 +123029,69 @@ app.post("/api/generate-video-prompt", rateLimiter, async (req, res) => {
     if (!rawText) throw new Error("Failed to analyze video keyframes");
     const parsed = parseVideoVisionResponse(rawText, mode);
     let finalVideoUsage = reservation;
-    if (isSupabaseConfigured && supabaseAdmin && reservation.reservation_id) {
-      try {
-        const { data: finalData, error: finalErr } = await supabaseAdmin.rpc("finalize_generation_credit", {
-          p_reservation_id: reservation.reservation_id
+    try {
+      const { data: finalData, error: finalErr } = await supabaseAdmin.rpc("finalize_generation_credit", {
+        p_reservation_id: reservation.reservation_id
+      });
+      if (finalErr || !finalData?.success) {
+        const failureReason = finalErr?.message || finalData?.reason || "Unknown finalization error";
+        console.error("[GENERATE-VIDEO] Credit finalization failed:", failureReason);
+        res.status(500).json({
+          success: false,
+          error: "Unable to finalize credit accounting. Please try again.",
+          details: failureReason,
+          code: "FINALIZATION_FAILED"
         });
-        if (!finalErr && finalData?.success) {
-          finalVideoUsage = { ...finalVideoUsage, remaining: finalData.remaining, generations_used: finalData.generations_used };
-        }
-      } catch (finalizeErr) {
-        console.error("Failed to finalize video credit reservation:", finalizeErr);
+        return;
       }
+      finalVideoUsage = { ...finalVideoUsage, remaining: finalData.remaining, generations_used: finalData.generations_used };
+      console.log(`[GENERATE-VIDEO] Reservation finalized. New remaining: ${finalVideoUsage.remaining}`);
+    } catch (finalizeErr) {
+      console.error("[GENERATE-VIDEO] Exception during video credit finalization:", finalizeErr);
+      res.status(500).json({
+        success: false,
+        error: "Unable to finalize credit accounting due to a server error. Please try again.",
+        details: finalizeErr?.message || "Finalization exception",
+        code: "FINALIZATION_FAILED"
+      });
+      return;
     }
-    if (isSupabaseConfigured && supabaseAdmin) {
-      try {
-        await supabaseAdmin.from("generations").insert({
-          user_id: authUser.id,
-          reservation_id: reservation.reservation_id || null,
-          prompt: parsed.prompt,
-          negative_prompt: parsed.negativePrompt || null,
-          mode: `video_${mode}`,
-          target_engine: mode,
-          detail_level: "detailed",
-          detected_style: parsed.analysis?.visualStyle || "Cinematic Video",
-          aspect_ratio: "16:9",
-          model_used: chosenModel
-        });
-      } catch (dbErr) {
-        console.warn("Failed to record video generation metadata:", dbErr);
+    let historySaved = false;
+    let historyWarning = void 0;
+    try {
+      const { data: insertData, error: insertErr } = await supabaseAdmin.from("generations").insert({
+        user_id: authUser.id,
+        reservation_id: reservation.reservation_id,
+        prompt: parsed.prompt,
+        negative_prompt: parsed.negativePrompt || null,
+        mode: `video_${mode}`,
+        target_engine: mode,
+        detail_level: "detailed",
+        detected_style: parsed.analysis?.visualStyle || "Cinematic Video",
+        aspect_ratio: "16:9",
+        model_used: chosenModel
+      }).select("id").single();
+      if (insertErr) {
+        console.error("[GENERATE-VIDEO] Failed to record video generation record into Supabase:", insertErr);
+        historySaved = false;
+        historyWarning = "Generation completed, but saving to your History failed. Your prompt has been generated and credit accounted.";
+      } else {
+        historySaved = true;
+        console.log(`[GENERATE-VIDEO] Video generation record persisted to history: ${insertData?.id}`);
       }
+    } catch (dbErr) {
+      console.error("[GENERATE-VIDEO] Exception recording video generation metadata to database:", dbErr);
+      historySaved = false;
+      historyWarning = "Generation completed, but saving to your History failed due to a database error.";
     }
     res.json({
       success: true,
       ...parsed,
       modelUsed: chosenModel,
       creditsRemaining: finalVideoUsage.remaining,
-      generationsUsed: finalVideoUsage.generations_used
+      generationsUsed: finalVideoUsage.generations_used,
+      historySaved,
+      ...historyWarning ? { historyWarning } : {}
     });
   } catch (error) {
     handleApiError(error, res, "Failed to analyze video keyframes. Please try another clip.");
