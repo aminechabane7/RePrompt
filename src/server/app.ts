@@ -288,6 +288,87 @@ function getGeminiApiKey(): string {
   return rawKey.replace(/^["']|["']$/g, '').trim();
 }
 
+// Global Daily Gemini API Cap configuration and state management
+export function getDailyBetaCap(): number {
+  const envVal = process.env.DAILY_BETA_CAP;
+  if (envVal) {
+    const parsed = parseInt(envVal.trim(), 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return 20; // Default: 20 Gemini attempts per UTC day
+}
+
+export class DailyCapReachedError extends Error {
+  code = 'DAILY_BETA_CAP_REACHED';
+  currentCount?: number;
+  capLimit?: number;
+
+  constructor(message?: string, currentCount?: number, capLimit?: number) {
+    super(
+      message ||
+        'The daily beta generation limit has been reached across the platform. To maintain service reliability during the beta, capacity resets daily at 00:00 UTC. Please try again tomorrow.'
+    );
+    this.name = 'DailyCapReachedError';
+    this.currentCount = currentCount;
+    this.capLimit = capLimit;
+  }
+}
+
+export class DailyCapCheckError extends Error {
+  code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'DailyCapCheckError';
+    this.code = code;
+  }
+}
+
+// Enforces shared atomic global daily Gemini API limit across Vercel serverless instances
+async function checkAndIncrementGlobalDailyCap(): Promise<{
+  allowed: boolean;
+  currentCount: number;
+  capLimit: number;
+  usageDate: string;
+}> {
+  if (!supabaseAdmin) {
+    console.error('[DAILY-CAP] Fail-closed: privileged Supabase client (supabaseAdmin) is unavailable');
+    throw new DailyCapCheckError('SERVICE_ROLE_UNAVAILABLE', 'Database service is temporarily unavailable for daily cap verification');
+  }
+
+  const capLimit = getDailyBetaCap();
+  console.log(`[DAILY-CAP] Evaluating global daily Gemini cap (configured limit: ${capLimit})...`);
+
+  const { data, error } = await supabaseAdmin.rpc('check_and_increment_daily_cap', {
+    p_cap_limit: capLimit,
+  });
+
+  if (error) {
+    console.error('[DAILY-CAP] Fail-closed: Supabase RPC check_and_increment_daily_cap error:', error);
+    throw new DailyCapCheckError('CAP_RPC_ERROR', `Daily cap database verification failed: ${error.message}`);
+  }
+
+  if (!data || !data.allowed) {
+    const currentCount = data?.current_count ?? capLimit;
+    console.warn(`[DAILY-CAP] Global daily Gemini cap EXHAUSTED: ${currentCount}/${capLimit} on UTC date ${data?.usage_date || 'today'}`);
+    throw new DailyCapReachedError(
+      'The daily beta generation limit has been reached across the platform. To maintain service reliability during the beta, capacity resets daily at 00:00 UTC. Please try again tomorrow.',
+      currentCount,
+      capLimit
+    );
+  }
+
+  console.log(`[DAILY-CAP] Cap check passed: attempt ${data.current_count}/${data.cap_limit} on UTC date ${data.usage_date}`);
+  return {
+    allowed: true,
+    currentCount: data.current_count,
+    capLimit: data.cap_limit,
+    usageDate: data.usage_date,
+  };
+}
+
 // 5. Health Check Endpoint:
 // Public liveness probe returning minimal status
 app.get('/api/health', (_req: Request, res: Response) => {
@@ -661,6 +742,9 @@ async function callGeminiVision(
   for (const model of candidateModels) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
+        // Enforce shared global daily Gemini cap immediately before each API attempt
+        await checkAndIncrementGlobalDailyCap();
+
         console.log(`[Gemini Vision] Requesting model ${model} (attempt ${attempt + 1})...`);
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 25000);
@@ -696,6 +780,17 @@ async function callGeminiVision(
           throw new Error(`Model ${model} returned an empty response`);
         }
       } catch (err: any) {
+        // Halt immediately if global daily cap reached or cap database verification failed
+        if (
+          err instanceof DailyCapReachedError ||
+          err?.code === 'DAILY_BETA_CAP_REACHED' ||
+          err instanceof DailyCapCheckError ||
+          err?.code === 'SERVICE_ROLE_UNAVAILABLE' ||
+          err?.code === 'CAP_RPC_ERROR'
+        ) {
+          throw err;
+        }
+
         lastError = err;
         console.warn(`[Gemini Vision] Model ${model} attempt ${attempt + 1} failed:`, err?.message || err);
         if (err.message === 'AI_TIMEOUT') {
@@ -749,6 +844,14 @@ function handleApiError(err: any, res: Response, fallbackMsg: string) {
     .replace(/sbp_[0-9A-Za-z-_]{30,}/g, '[REDACTED_SUPABASE_KEY]');
 
   console.error('[API Error]:', sanitizedMsg, `(status: ${errCode})`);
+
+  if (err instanceof DailyCapReachedError || err?.code === 'DAILY_BETA_CAP_REACHED') {
+    return res.status(429).json({
+      success: false,
+      error: err.message || 'The daily beta generation limit has been reached across the platform. To maintain service reliability during the beta, capacity resets daily at 00:00 UTC. Please try again tomorrow.',
+      code: 'DAILY_BETA_CAP_REACHED',
+    });
+  }
 
   if (err?.message === 'AI_TIMEOUT') {
     return res.status(504).json({
@@ -1106,22 +1209,47 @@ app.post('/api/generate-prompt', rateLimiter, async (req: Request, res: Response
       console.log(`[GENERATE-PROMPT] AI Vision analysis completed successfully using model: ${modelName}`);
     } catch (aiError: any) {
       console.error('[GENERATE-PROMPT] AI Vision analysis failed:', aiError?.message || aiError);
-      // If AI call failed, release/refund the unfinalized reservation safely without negative balance
+      // If AI call failed or cap reached, release/refund the unfinalized reservation safely without charging
       if (supabaseAdmin && reservation.reservation_id) {
         try {
+          const releaseReason =
+            aiError.code === 'DAILY_BETA_CAP_REACHED'
+              ? 'DAILY_BETA_CAP_REACHED'
+              : aiError.message === 'AI_TIMEOUT'
+              ? 'AI_TIMEOUT'
+              : 'AI_FAILURE';
           const { error: releaseErr } = await supabaseAdmin.rpc('release_generation_credit', {
             p_reservation_id: reservation.reservation_id,
-            p_reason: aiError.message === 'AI_TIMEOUT' ? 'AI_TIMEOUT' : 'AI_FAILURE',
+            p_reason: releaseReason,
           });
           if (releaseErr) {
             console.error('[GENERATE-PROMPT] Error releasing credit reservation:', releaseErr);
           } else {
-            console.log(`[GENERATE-PROMPT] Released reservation ${reservation.reservation_id} due to AI failure`);
+            console.log(`[GENERATE-PROMPT] Released reservation ${reservation.reservation_id} due to ${releaseReason}`);
           }
         } catch (releaseErr) {
           console.error('[GENERATE-PROMPT] Failed to release reservation on AI failure:', releaseErr);
         }
       }
+
+      if (aiError.code === 'DAILY_BETA_CAP_REACHED') {
+        res.status(429).json({
+          success: false,
+          error: aiError.message || 'The daily beta generation limit has been reached across the platform. To maintain service reliability during the beta, capacity resets daily at 00:00 UTC. Please try again tomorrow.',
+          code: 'DAILY_BETA_CAP_REACHED',
+        });
+        return;
+      }
+
+      if (aiError.code === 'SERVICE_ROLE_UNAVAILABLE' || aiError.code === 'CAP_RPC_ERROR') {
+        res.status(503).json({
+          success: false,
+          error: 'Generation service is temporarily unavailable. Please try again shortly.',
+          code: aiError.code,
+        });
+        return;
+      }
+
       throw aiError;
     }
 
@@ -1346,6 +1474,9 @@ ${prompt}`;
       let generationSuccess = false;
       for (const model of candidateModels) {
         try {
+          // Enforce shared global daily Gemini cap immediately before each API attempt
+          await checkAndIncrementGlobalDailyCap();
+
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 20000);
 
@@ -1367,6 +1498,15 @@ ${prompt}`;
             break;
           }
         } catch (err: any) {
+          if (
+            err instanceof DailyCapReachedError ||
+            err?.code === 'DAILY_BETA_CAP_REACHED' ||
+            err instanceof DailyCapCheckError ||
+            err?.code === 'SERVICE_ROLE_UNAVAILABLE' ||
+            err?.code === 'CAP_RPC_ERROR'
+          ) {
+            throw err;
+          }
           if (err.message === 'AI_TIMEOUT') throw new Error('AI_TIMEOUT');
         }
       }
@@ -1377,19 +1517,44 @@ ${prompt}`;
       console.error('[IMPROVE-PROMPT] AI improvement failed:', aiErr?.message || aiErr);
       if (supabaseAdmin && reservation.reservation_id) {
         try {
+          const releaseReason =
+            aiErr.code === 'DAILY_BETA_CAP_REACHED'
+              ? 'DAILY_BETA_CAP_REACHED'
+              : aiErr.message === 'AI_TIMEOUT'
+              ? 'AI_TIMEOUT'
+              : 'AI_FAILURE';
           const { error: releaseErr } = await supabaseAdmin.rpc('release_generation_credit', {
             p_reservation_id: reservation.reservation_id,
-            p_reason: aiErr.message === 'AI_TIMEOUT' ? 'AI_TIMEOUT' : 'AI_FAILURE',
+            p_reason: releaseReason,
           });
           if (releaseErr) {
             console.error('[IMPROVE-PROMPT] Error releasing credit reservation:', releaseErr);
           } else {
-            console.log(`[IMPROVE-PROMPT] Released reservation ${reservation.reservation_id} due to AI failure`);
+            console.log(`[IMPROVE-PROMPT] Released reservation ${reservation.reservation_id} due to ${releaseReason}`);
           }
         } catch (releaseErr) {
           console.error('[IMPROVE-PROMPT] Failed to release reservation on AI failure:', releaseErr);
         }
       }
+
+      if (aiErr.code === 'DAILY_BETA_CAP_REACHED') {
+        res.status(429).json({
+          success: false,
+          error: aiErr.message || 'The daily beta generation limit has been reached across the platform. To maintain service reliability during the beta, capacity resets daily at 00:00 UTC. Please try again tomorrow.',
+          code: 'DAILY_BETA_CAP_REACHED',
+        });
+        return;
+      }
+
+      if (aiErr.code === 'SERVICE_ROLE_UNAVAILABLE' || aiErr.code === 'CAP_RPC_ERROR') {
+        res.status(503).json({
+          success: false,
+          error: 'Prompt improvement service is temporarily unavailable. Please try again shortly.',
+          code: aiErr.code,
+        });
+        return;
+      }
+
       throw aiErr;
     }
 
@@ -1722,6 +1887,9 @@ app.post('/api/generate-video-prompt', rateLimiter, async (req: Request, res: Re
     try {
       for (const model of candidateModels) {
         try {
+          // Enforce shared global daily Gemini cap immediately before each API attempt
+          await checkAndIncrementGlobalDailyCap();
+
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 28000);
 
@@ -1747,26 +1915,60 @@ app.post('/api/generate-video-prompt', rateLimiter, async (req: Request, res: Re
             break;
           }
         } catch (err: any) {
+          if (
+            err instanceof DailyCapReachedError ||
+            err?.code === 'DAILY_BETA_CAP_REACHED' ||
+            err instanceof DailyCapCheckError ||
+            err?.code === 'SERVICE_ROLE_UNAVAILABLE' ||
+            err?.code === 'CAP_RPC_ERROR'
+          ) {
+            throw err;
+          }
           if (err.message === 'AI_TIMEOUT') throw new Error('AI_TIMEOUT');
         }
       }
-    } catch (aiErr) {
-      // Release reservation on AI failure
+    } catch (aiErr: any) {
+      // Release reservation on AI failure or daily cap reached
       if (supabaseAdmin && reservation.reservation_id) {
         try {
+          const releaseReason =
+            aiErr?.code === 'DAILY_BETA_CAP_REACHED'
+              ? 'DAILY_BETA_CAP_REACHED'
+              : aiErr?.message === 'AI_TIMEOUT'
+              ? 'AI_TIMEOUT'
+              : 'AI_FAILURE';
           const { error: releaseErr } = await supabaseAdmin.rpc('release_generation_credit', {
             p_reservation_id: reservation.reservation_id,
-            p_reason: 'AI_FAILURE',
+            p_reason: releaseReason,
           });
           if (releaseErr) {
             console.error('[GENERATE-VIDEO] Error releasing video reservation:', releaseErr);
           } else {
-            console.log(`[GENERATE-VIDEO] Released reservation ${reservation.reservation_id} due to AI failure`);
+            console.log(`[GENERATE-VIDEO] Released reservation ${reservation.reservation_id} due to ${releaseReason}`);
           }
         } catch (releaseErr) {
           console.error('[GENERATE-VIDEO] Failed to release video reservation:', releaseErr);
         }
       }
+
+      if (aiErr?.code === 'DAILY_BETA_CAP_REACHED') {
+        res.status(429).json({
+          success: false,
+          error: aiErr.message || 'The daily beta generation limit has been reached across the platform. To maintain service reliability during the beta, capacity resets daily at 00:00 UTC. Please try again tomorrow.',
+          code: 'DAILY_BETA_CAP_REACHED',
+        });
+        return;
+      }
+
+      if (aiErr?.code === 'SERVICE_ROLE_UNAVAILABLE' || aiErr?.code === 'CAP_RPC_ERROR') {
+        res.status(503).json({
+          success: false,
+          error: 'Video generation service is temporarily unavailable. Please try again shortly.',
+          code: aiErr.code,
+        });
+        return;
+      }
+
       throw aiErr;
     }
 

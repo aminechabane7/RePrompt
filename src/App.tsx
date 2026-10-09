@@ -316,6 +316,10 @@ export default function App() {
           await refreshUsage();
           throw new Error('Free generation limit reached (3 of 3 free generations used).');
         }
+        if (response.status === 429 && data?.code === 'DAILY_BETA_CAP_REACHED') {
+          await refreshUsage();
+          throw new Error(data?.error || 'The daily beta generation limit has been reached across the platform. Capacity resets daily at 00:00 UTC. Please try again tomorrow.');
+        }
         throw new Error(data?.error || 'Failed to analyze image and generate prompt.');
       }
 
@@ -382,6 +386,9 @@ export default function App() {
         setGeneratedPrompt(data.improvedPrompt);
         await refreshUsage();
       } else {
+        if (response.status === 429 || data?.code === 'DAILY_BETA_CAP_REACHED') {
+          await refreshUsage();
+        }
         throw new Error(data?.error || 'Failed to improve prompt.');
       }
     } catch (err: any) {
