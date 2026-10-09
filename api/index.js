@@ -121879,36 +121879,9 @@ function rateLimiter(req, res, next) {
   record.count += 1;
   next();
 }
-var AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1e3;
-var MAX_SIGNUP_REQUESTS_PER_WINDOW = 15;
-var signupRateLimitMap = /* @__PURE__ */ new Map();
 var EMAIL_CHECK_WINDOW_MS = 10 * 60 * 1e3;
 var MAX_EMAIL_CHECKS_PER_WINDOW = 40;
 var emailCheckRateLimitMap = /* @__PURE__ */ new Map();
-function signupRateLimiter(req, res, next) {
-  const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "anonymous";
-  const now = Date.now();
-  const record = signupRateLimitMap.get(ip);
-  if (signupRateLimitMap.size > 5e3) {
-    for (const [key, val] of signupRateLimitMap.entries()) {
-      if (now > val.resetTime) signupRateLimitMap.delete(key);
-    }
-  }
-  if (!record || now > record.resetTime) {
-    signupRateLimitMap.set(ip, { count: 1, resetTime: now + AUTH_RATE_LIMIT_WINDOW_MS });
-    return next();
-  }
-  if (record.count >= MAX_SIGNUP_REQUESTS_PER_WINDOW) {
-    const retrySec = Math.ceil((record.resetTime - now) / 1e3);
-    res.set("Retry-After", String(retrySec));
-    return res.status(429).json({
-      success: false,
-      error: "Too many signup attempts. Please wait a few minutes before trying again."
-    });
-  }
-  record.count += 1;
-  next();
-}
 function emailCheckRateLimiter(req, res, next) {
   const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "anonymous";
   const now = Date.now();
@@ -122460,89 +122433,6 @@ var handleValidateEmail = (req, res) => {
 };
 app.post("/api/validate-email", emailCheckRateLimiter, handleValidateEmail);
 app.post("/api/auth/validate-email", emailCheckRateLimiter, handleValidateEmail);
-app.post("/api/auth/signup", signupRateLimiter, async (req, res) => {
-  try {
-    const { email, password, displayName, captchaToken } = req.body || {};
-    if (!email || typeof email !== "string") {
-      res.status(400).json({ success: false, error: "Email address is required." });
-      return;
-    }
-    if (!password || typeof password !== "string" || password.length < 6) {
-      res.status(400).json({ success: false, error: "Password must be at least 6 characters." });
-      return;
-    }
-    const validation = validateSignupEmail(email);
-    if (!validation.isValid) {
-      res.status(400).json({
-        success: false,
-        error: validation.error || "Please enter a valid email address."
-      });
-      return;
-    }
-    if (validation.isDisposable) {
-      res.status(400).json({
-        success: false,
-        error: "Temporary or disposable email addresses are not allowed. Please use a permanent email address."
-      });
-      return;
-    }
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      res.status(503).json({
-        success: false,
-        error: "Authentication service is not yet configured. Please contact the administrator."
-      });
-      return;
-    }
-    const clientForAuth = supabaseAnonServer || createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { autoRefreshToken: false, persistSession: false }
-    });
-    const signUpOptions = {
-      data: {
-        full_name: typeof displayName === "string" ? displayName.trim() : ""
-      }
-    };
-    if (captchaToken && typeof captchaToken === "string") {
-      signUpOptions.captchaToken = captchaToken;
-    }
-    const { data, error } = await clientForAuth.auth.signUp({
-      email: validation.normalizedEmail || email.trim(),
-      password,
-      options: signUpOptions
-    });
-    if (error) {
-      if (error.message.toLowerCase().includes("already registered") || error.message.toLowerCase().includes("already exists")) {
-        res.status(400).json({
-          success: false,
-          error: "An account with this email already exists. Please sign in instead."
-        });
-        return;
-      }
-      if (error.message.toLowerCase().includes("captcha") || error.message.toLowerCase().includes("security check") || error.message.toLowerCase().includes("turnstile")) {
-        res.status(400).json({
-          success: false,
-          error: "Security verification failed. Please complete the security check again."
-        });
-        return;
-      }
-      res.status(400).json({
-        success: false,
-        error: error.message || "Unable to create account. Please try again."
-      });
-      return;
-    }
-    res.json({
-      success: true,
-      user: data.user,
-      session: data.session
-    });
-  } catch (err) {
-    console.error("Signup error:", err);
-    res.status(500).json({
-      success: false,
-      error: "An unexpected error occurred during account creation. Please try again."
-    });
-  }
-});
 app.get("/api/user/usage", async (req, res) => {
   try {
     const authUser = await verifyAuthUser(req);
